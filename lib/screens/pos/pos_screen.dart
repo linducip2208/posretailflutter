@@ -86,6 +86,16 @@ class _PosScreenState extends State<PosScreen> {
     super.dispose();
   }
 
+  int? get _outletId => context.read<AuthProvider>().currentOutletId;
+
+  List<Product> _parseProducts(dynamic data) {
+    if (data is! List) return [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(Product.fromJson)
+        .toList();
+  }
+
   Future<void> _search(String query) async {
     if (query.isEmpty) {
       await _loadProducts();
@@ -95,8 +105,15 @@ class _PosScreenState extends State<PosScreen> {
       try {
         final response = await _api.get('/products?search=$query');
         final data = response['data'] ?? response;
-        setState(() => _products = (data as List).map((j) => Product.fromJson(j)).toList());
-        _offline.cacheProducts(data.cast<Map<String, dynamic>>());
+        final products = _parseProducts(data);
+        if (!mounted) return;
+        setState(() => _products = products);
+        final outletId = _outletId;
+        if (outletId != null && data is List) {
+          await _offline.cacheProducts(
+              data.whereType<Map<String, dynamic>>().toList(),
+              outletId: outletId);
+        }
       } catch (_) {
         await _searchOffline(query);
       }
@@ -110,8 +127,15 @@ class _PosScreenState extends State<PosScreen> {
       try {
         final response = await _api.get('/products?per_page=50');
         final data = response['data'] ?? response;
-        setState(() => _products = (data as List).map((j) => Product.fromJson(j)).toList());
-        _offline.cacheProducts(data.cast<Map<String, dynamic>>());
+        final products = _parseProducts(data);
+        if (!mounted) return;
+        setState(() => _products = products);
+        final outletId = _outletId;
+        if (outletId != null && data is List) {
+          await _offline.cacheProducts(
+              data.whereType<Map<String, dynamic>>().toList(),
+              outletId: outletId);
+        }
       } catch (_) {
         await _searchOffline(null);
       }
@@ -121,17 +145,15 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Future<void> _searchOffline(String? query) async {
-    final results = await _offline.searchProducts(query);
-    setState(() => _products = results.map((m) => Product(
-      id: m['id'],
-      name: m['name'] ?? '',
-      sku: m['sku'],
-      barcode: m['barcode'],
-      sellingPrice: (m['selling_price'] ?? 0).toDouble(),
-      currentStock: m['current_stock'] ?? 0,
-      image: m['image'],
-      categoryName: m['category_name'],
-    )).toList());
+    final outletId = _outletId;
+    if (outletId == null) {
+      if (mounted) setState(() => _products = []);
+      return;
+    }
+    final results = await _offline.searchProducts(query, outletId: outletId);
+    if (!mounted) return;
+    setState(() =>
+        _products = results.map(Product.fromJson).toList());
   }
 
   Future<void> _scanBarcode(String barcode) async {
@@ -149,9 +171,13 @@ class _PosScreenState extends State<PosScreen> {
       Map<String, dynamic>? productData;
       if (_isOnline) {
         final response = await _api.post('/products/barcode', body: {'barcode': barcode});
-        productData = (response['data'] ?? response);
+        final data = response['data'] ?? response;
+        productData = data is Map<String, dynamic> ? data : null;
       } else {
-        productData = await _offline.getProductByBarcode(barcode);
+        final outletId = _outletId;
+        productData = outletId == null
+            ? null
+            : await _offline.getProductByBarcode(barcode, outletId: outletId);
       }
 
       if (productData != null && productData.isNotEmpty) {

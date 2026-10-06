@@ -41,8 +41,12 @@ class Product {
       wholesalePrice: json['wholesale_price'] != null ? safeDouble(json['wholesale_price']) : null,
       currentStock: safeInt(json['current_stock']),
       image: json['image']?.toString(),
-      categoryName: json['category'] is Map ? safeString(json['category']['name'], '') : null,
-      unitName: json['unit'] is Map ? safeString(json['unit']['name'], '') : null,
+      categoryName: json['category'] is Map
+          ? safeString(json['category']['name'], '')
+          : (json['category_name'] != null ? safeString(json['category_name']) : null),
+      unitName: json['unit'] is Map
+          ? safeString(json['unit']['name'], '')
+          : (json['unit_name'] != null ? safeString(json['unit_name']) : null),
       // Backend tidak mengirim has_variants — turunkan dari relasi variants bila ada.
       hasVariants: json['has_variants'] == true ||
           json['has_variants'] == 1 ||

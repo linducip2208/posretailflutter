@@ -28,21 +28,40 @@ class OfflineSyncService {
   Future<void> init() async {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(p.join(dbPath, 'pos_offline.db'),
-        version: 2,
+        version: 3,
         onCreate: (db, version) async {
           await db.execute('''
         CREATE TABLE products (
           id INTEGER PRIMARY KEY,
+          outlet_id INTEGER,
           name TEXT, sku TEXT, barcode TEXT,
           selling_price REAL, current_stock INTEGER,
-          image TEXT, category_name TEXT
+          image TEXT, category_name TEXT,
+          updated_at TEXT
         )
       ''');
+          await db.execute('''
+        CREATE TABLE product_variants (
+          id INTEGER PRIMARY KEY,
+          product_id INTEGER,
+          outlet_id INTEGER,
+          name TEXT, sku TEXT, barcode TEXT,
+          selling_price REAL, current_stock INTEGER,
+          updated_at TEXT
+        )
+      ''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_pv_outlet_barcode ON product_variants(outlet_id, barcode)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)');
           await _createOrdersTable(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await _createOrdersTable(db);
+          }
+          if (oldVersion < 3) {
+            await _upgradeProductsV3(db);
           }
         });
 
@@ -69,43 +88,122 @@ class OfflineSyncService {
     }
   }
 
-  // Cache products for offline use
-  Future<void> cacheProducts(List<Map<String, dynamic>> products) async {
+  double _num(dynamic v) =>
+      v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0;
+  int _int(dynamic v) =>
+      v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
+
+  Future<void> _upgradeProductsV3(Database db) async {
+    // v3: cache outlet-aware + tabel varian. Tanpa DELETE massal.
+    final cols = await db.rawQuery('PRAGMA table_info(products)');
+    final names = cols.map((c) => c['name'] as String).toSet();
+    if (!names.contains('outlet_id')) {
+      await db.execute('ALTER TABLE products ADD COLUMN outlet_id INTEGER');
+    }
+    if (!names.contains('updated_at')) {
+      await db.execute('ALTER TABLE products ADD COLUMN updated_at TEXT');
+    }
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id INTEGER PRIMARY KEY,
+        product_id INTEGER,
+        outlet_id INTEGER,
+        name TEXT, sku TEXT, barcode TEXT,
+        selling_price REAL, current_stock INTEGER,
+        updated_at TEXT
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pv_outlet_barcode ON product_variants(outlet_id, barcode)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)');
+  }
+
+  // Cache produk: UPSERT per baris (replace), TANPA delete massal.
+  // Hasil search tidak boleh menghapus katalog yang sudah tersimpan,
+  // dan cache tidak boleh tercampur antar outlet.
+  Future<void> cacheProducts(List<Map<String, dynamic>> products,
+      {required int outletId}) async {
     if (_db == null) return;
+    final now = DateTime.now().toIso8601String();
     final batch = _db!.batch();
-    batch.delete('products');
     for (final p in products) {
-      batch.insert('products', {
-        'id': p['id'],
-        'name': p['name'],
-        'sku': p['sku'],
-        'barcode': p['barcode'],
-        'selling_price': (p['selling_price'] ?? 0).toDouble(),
-        'current_stock': p['current_stock'] ?? 0,
-        'image': p['image'],
-        'category_name': p['category']?['name'],
-      });
+      final pid = _int(p['id']);
+      batch.insert(
+        'products',
+        {
+          'id': pid,
+          'outlet_id': outletId,
+          'name': p['name']?.toString(),
+          'sku': p['sku']?.toString(),
+          'barcode': p['barcode']?.toString(),
+          'selling_price': _num(p['selling_price']),
+          'current_stock': _int(p['current_stock']),
+          'image': p['image']?.toString(),
+          'category_name': p['category'] is Map
+              ? p['category']['name']?.toString()
+              : p['category_name']?.toString(),
+          'updated_at': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      final variants = p['variants'];
+      if (variants is List) {
+        for (final v in variants) {
+          if (v is! Map<String, dynamic>) continue;
+          batch.insert(
+            'product_variants',
+            {
+              'id': _int(v['id']),
+              'product_id': pid,
+              'outlet_id': outletId,
+              'name': v['name']?.toString(),
+              'sku': v['sku']?.toString(),
+              'barcode': v['barcode']?.toString(),
+              'selling_price': _num(v['selling_price'] ?? p['selling_price']),
+              'current_stock': _int(v['current_stock'] ?? 0),
+              'updated_at': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
     }
     await batch.commit(noResult: true);
   }
 
-  // Search products from local cache
-  Future<List<Map<String, dynamic>>> searchProducts(String? query) async {
+  // Search products from local cache (selalu dibatasi outlet aktif).
+  Future<List<Map<String, dynamic>>> searchProducts(String? query,
+      {required int outletId}) async {
     if (_db == null) return [];
     if (query == null || query.isEmpty) {
-      return _db!.query('products', limit: 50);
+      return _db!.query('products',
+          where: 'outlet_id = ?', whereArgs: [outletId], limit: 50);
     }
     return _db!.query('products',
-        where: 'name LIKE ? OR sku LIKE ? OR barcode = ?',
-        whereArgs: ['%$query%', '%$query%', query],
+        where: 'outlet_id = ? AND (name LIKE ? OR sku LIKE ? OR barcode = ?)',
+        whereArgs: [outletId, '%$query%', '%$query%', query],
         limit: 50);
   }
 
-  Future<Map<String, dynamic>?> getProductByBarcode(String barcode) async {
-    if (_db == null) return null;
+  Future<Map<String, dynamic>?> getProductByBarcode(String barcode,
+      {required int outletId}) async {
+    if (_db == null || barcode.isEmpty) return null;
     final results = await _db!.query('products',
-        where: 'barcode = ?', whereArgs: [barcode], limit: 1);
-    return results.isNotEmpty ? results.first : null;
+        where: 'outlet_id = ? AND barcode = ?',
+        whereArgs: [outletId, barcode],
+        limit: 1);
+    if (results.isNotEmpty) return results.first;
+    // Fallback: barcode milik varian.
+    final v = await _db!.query('product_variants',
+        where: 'outlet_id = ? AND barcode = ?',
+        whereArgs: [outletId, barcode],
+        limit: 1);
+    if (v.isEmpty) return null;
+    final parent = await _db!.query('products',
+        where: 'id = ?', whereArgs: [v.first['product_id']], limit: 1);
+    if (parent.isEmpty) return null;
+    return {...parent.first, ...v.first, 'id': parent.first['id']};
   }
 
   Future<void> _createOrdersTable(Database db) async {
