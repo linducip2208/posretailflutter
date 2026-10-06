@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../l10n/s.dart';
 import '../../models/payment_method.dart';
 import '../../providers/cart_provider.dart';
 import '../../services/api_service.dart';
@@ -33,18 +34,29 @@ class _PaymentDialogState extends State<PaymentDialog> {
     _loadMethods();
   }
 
+  String? _loadError;
+
   Future<void> _loadMethods() async {
     try {
       final response = await _api.get('/payment-methods');
       final data = response['data'] ?? response;
-      final list = (data as List).map((j) => PaymentMethod.fromJson(j)).toList();
-      if (list.isNotEmpty) {
-        setState(() {
-          _methods = list;
+      final list = (data as List)
+          .whereType<Map<String, dynamic>>()
+          .map(PaymentMethod.fromJson)
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _methods = list;
+        if (list.isNotEmpty) {
           _entries = [PaymentEntry(method: list.first)];
-        });
-      }
-    } catch (_) {}
+        } else {
+          _loadError = 'Metode pembayaran belum tersedia';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadError = e.toString());
+    }
   }
 
   double get _totalPaid => _entries.fold(0, (s, e) => s + e.amount);
@@ -74,11 +86,22 @@ class _PaymentDialogState extends State<PaymentDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Pembayaran', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+            Text(S.t(context, 'Pembayaran'), style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
-            Text('Total: ${format.format(cart.totalAmount)}',
+            Text('${S.t(context, 'Total')}: ${format.format(cart.totalAmount)}',
                 style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800, color: theme.colorScheme.primary)),
+            if (_loadError != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(_loadError!, style: TextStyle(fontSize: 12, color: Colors.red.shade700)),
+              ),
+            ],
             const SizedBox(height: 16),
 
             ..._entries.asMap().entries.map((e) {
@@ -132,7 +155,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
             TextButton.icon(
               onPressed: _addEntry,
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('Tambah Metode Bayar', style: TextStyle(fontSize: 12)),
+              label: Text(S.t(context, 'Tambah Metode Bayar'), style: const TextStyle(fontSize: 12)),
             ),
 
             if (_totalPaid > 0) ...[
@@ -140,14 +163,14 @@ class _PaymentDialogState extends State<PaymentDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total Dibayar:', style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text(S.t(context, 'Total Dibayar:'), style: const TextStyle(fontWeight: FontWeight.w600)),
                   Text(format.format(_totalPaid), style: const TextStyle(fontWeight: FontWeight.w700)),
                 ],
               ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Kembalian/Kurang:'),
+                  Text(S.t(context, 'Kembalian/Kurang:')),
                   Text(
                     _remaining <= 0 ? format.format(_remaining.abs()) : format.format(_remaining),
                     style: TextStyle(
@@ -173,7 +196,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
                 ),
                 child: _isLoading
                     ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                    : const Text('Proses Pembayaran', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    : Text(S.t(context, 'Proses Pembayaran'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ),
           ],

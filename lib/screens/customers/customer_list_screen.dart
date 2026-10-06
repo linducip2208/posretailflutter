@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/s.dart';
 import '../../models/customer.dart';
 import '../../services/api_service.dart';
 
@@ -57,10 +58,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           padding: const EdgeInsets.all(12),
           child: TextField(
             controller: _searchCtrl,
-            decoration: const InputDecoration(
-              hintText: 'Cari customer...',
-              prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              hintText: S.t(context, 'Cari customer...'),
+              prefixIcon: const Icon(Icons.search),
+              border: const OutlineInputBorder(),
               isDense: true,
             ),
             onSubmitted: _search,
@@ -72,7 +73,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       child: _loading
           ? const Center(child: CircularProgressIndicator())
           : _customers.isEmpty
-              ? ListView(children: const [SizedBox(height: 200), Center(child: Text('Tidak ada customer', style: TextStyle(color: Colors.grey)))])
+              ? ListView(children: [const SizedBox(height: 200), Center(child: Text(S.t(context, 'Tidak ada customer'), style: const TextStyle(color: Colors.grey)))])
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
                   itemCount: _customers.length,
@@ -83,9 +84,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: theme.colorScheme.primaryContainer,
-                          child: Text(c.name[0].toUpperCase(), style: TextStyle(color: theme.colorScheme.onPrimaryContainer, fontWeight: FontWeight.w700)),
+                          child: Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : '?', style: TextStyle(color: theme.colorScheme.onPrimaryContainer, fontWeight: FontWeight.w700)),
                         ),
-                        title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        title: Text(c.name.isNotEmpty ? c.name : S.t(context, '(tanpa nama)'), style: const TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(c.phone ?? '-'),
                         trailing: Column(
                           mainAxisAlignment: MainAxisAlignment.center,

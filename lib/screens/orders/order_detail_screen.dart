@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../l10n/s.dart';
 import '../../models/order.dart';
 import '../../providers/order_provider.dart';
 
@@ -25,7 +26,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _load() async {
     final order = await _op.getOrderDetail(widget.orderId);
+    if (!mounted) return;
     setState(() { _order = order; _loading = false; });
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'completed':
+        return S.t(context, 'Selesai');
+      case 'pending':
+        return S.t(context, 'Menunggu');
+      case 'processing':
+        return S.t(context, 'Diproses');
+      case 'cancelled':
+        return S.t(context, 'Dibatalkan');
+      default:
+        return status;
+    }
+  }
+
+  String _formatDate(String raw) {
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return '-';
+    return DateFormat('dd MMM yyyy, HH:mm').format(dt);
   }
 
   @override
@@ -34,30 +57,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final format = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
 
     return Scaffold(
-      appBar: AppBar(title: Text(_order?.orderNumber ?? 'Detail Pesanan')),
+      appBar: AppBar(title: Text(_order?.orderNumber ?? S.t(context, 'Detail Pesanan'))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _order == null
-              ? const Center(child: Text('Pesanan tidak ditemukan'))
+              ? Center(child: Text(S.t(context, 'Pesanan tidak ditemukan')))
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    _infoRow(theme, 'Nomor', _order!.orderNumber),
+                    _infoRow(theme, S.t(context, 'Nomor'), _order!.orderNumber),
                     if (_order!.queueNumber != null)
-                      _infoRow(theme, 'Antrian', _order!.queueNumber!),
-                    _infoRow(theme, 'Status', _order!.orderStatus.toUpperCase()),
-                    _infoRow(theme, 'Customer', _order!.customerName ?? 'Walk-in'),
-                    _infoRow(theme, 'Outlet', _order!.outletName ?? '-'),
-                    _infoRow(theme, 'Tanggal', DateFormat('dd MMM yyyy, HH:mm').format(DateTime.parse(_order!.createdAt))),
+                      _infoRow(theme, S.t(context, 'Antrian'), _order!.queueNumber!),
+                    _infoRow(theme, S.t(context, 'Status'), _statusLabel(_order!.orderStatus)),
+                    _infoRow(theme, S.t(context, 'Customer'),
+                        (_order!.customerName?.isNotEmpty ?? false) ? _order!.customerName! : S.t(context, 'Walk-in')),
+                    _infoRow(theme, S.t(context, 'Outlet'), _order!.outletName ?? '-'),
+                    _infoRow(theme, S.t(context, 'Tanggal'), _formatDate(_order!.createdAt)),
                     const Divider(height: 32),
 
-                    Text('Items', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                    Text(S.t(context, 'Items'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                     if (_order!.items != null)
                       ..._order!.items!.map((item) => Card(
                             margin: const EdgeInsets.only(bottom: 4),
                             child: ListTile(
-                              title: Text(item.productName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                              title: Text(item.productName.isNotEmpty ? item.productName : S.t(context, 'Item'),
+                                  style: const TextStyle(fontWeight: FontWeight.w600)),
                               subtitle: Text('${item.quantity} x ${format.format(item.unitPrice)}'),
                               trailing: Text(format.format(item.subtotal),
                                   style: TextStyle(fontWeight: FontWeight.w700, color: theme.colorScheme.primary)),
@@ -65,11 +90,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           )),
 
                     const Divider(height: 32),
-                    _totalRow(theme, 'Subtotal', _order!.subtotal, format),
-                    if (_order!.discountAmount > 0) _totalRow(theme, 'Diskon', -_order!.discountAmount, format, color: Colors.red),
-                    if (_order!.taxAmount > 0) _totalRow(theme, 'Pajak', _order!.taxAmount, format),
+                    _totalRow(theme, S.t(context, 'Subtotal'), _order!.subtotal, format),
+                    if (_order!.discountAmount > 0) _totalRow(theme, S.t(context, 'Diskon'), -_order!.discountAmount, format, color: Colors.red),
+                    if (_order!.taxAmount > 0) _totalRow(theme, S.t(context, 'Pajak'), _order!.taxAmount, format),
                     const Divider(),
-                    _totalRow(theme, 'Total', _order!.totalAmount, format, bold: true),
+                    _totalRow(theme, S.t(context, 'Total'), _order!.totalAmount, format, bold: true),
                   ],
                 ),
     );

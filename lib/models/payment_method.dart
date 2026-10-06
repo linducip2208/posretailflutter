@@ -1,3 +1,5 @@
+import '../utils/safe_parse.dart';
+
 class PaymentMethod {
   final int id;
   final String name;
@@ -13,10 +15,10 @@ class PaymentMethod {
 
   factory PaymentMethod.fromJson(Map<String, dynamic> json) {
     return PaymentMethod(
-      id: json['id'] ?? 0,
-      name: json['name'] ?? '',
-      code: json['code'] ?? '',
-      type: json['type'],
+      id: safeInt(json['id']),
+      name: safeString(json['name']),
+      code: safeString(json['code']),
+      type: json['type']?.toString(),
     );
   }
 }

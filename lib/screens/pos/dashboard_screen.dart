@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../l10n/s.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/order_provider.dart';
 import '../auth/login_screen.dart';
@@ -46,7 +47,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('POS Retail'),
+        title: Text(S.t(context, 'POS Retail')),
+        bottom: auth.currentOutlet == null
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(22),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${S.t(context, 'Outlet aktif')}: ${auth.currentOutlet!.name}',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
         actions: [
           if (_currentIndex == 0) ...[
             IconButton(icon: const Icon(Icons.qr_code_scanner), onPressed: () => setState(() => _currentIndex = 1)),
@@ -73,7 +86,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const PopupMenuDivider(),
               PopupMenuItem(
-                child: const Row(children: [Icon(Icons.logout, size: 18), SizedBox(width: 8), Text('Logout')]),
+                child: Row(children: [const Icon(Icons.logout, size: 18), const SizedBox(width: 8), Text(S.t(context, 'Keluar'))]),
                 onTap: () async {
                   await auth.logout();
                   if (context.mounted) {
@@ -91,12 +104,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) => setState(() => _currentIndex = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Beranda'),
-          NavigationDestination(icon: Icon(Icons.shopping_cart_outlined), selectedIcon: Icon(Icons.shopping_cart), label: 'POS'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Pesanan'),
-          NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Laporan'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Atur'),
+        destinations: [
+          NavigationDestination(icon: const Icon(Icons.dashboard_outlined), selectedIcon: const Icon(Icons.dashboard), label: S.t(context, 'Beranda')),
+          NavigationDestination(icon: const Icon(Icons.shopping_cart_outlined), selectedIcon: const Icon(Icons.shopping_cart), label: S.t(context, 'POS')),
+          NavigationDestination(icon: const Icon(Icons.receipt_long_outlined), selectedIcon: const Icon(Icons.receipt_long), label: S.t(context, 'Pesanan')),
+          NavigationDestination(icon: const Icon(Icons.bar_chart_outlined), selectedIcon: const Icon(Icons.bar_chart), label: S.t(context, 'Laporan')),
+          NavigationDestination(icon: const Icon(Icons.settings_outlined), selectedIcon: const Icon(Icons.settings), label: S.t(context, 'Atur')),
         ],
       ),
     );
@@ -113,26 +126,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         Row(
           children: [
-            Expanded(child: _statCard(theme, 'Transaksi Hari Ini', '$todayCount', Icons.receipt_long, Colors.blue)),
+            Expanded(child: _statCard(theme, S.t(context, 'Transaksi Hari Ini'), '$todayCount', Icons.receipt_long, Colors.blue)),
             const SizedBox(width: 12),
-            Expanded(child: _statCard(theme, 'Total Hari Ini', format.format(todayTotal), Icons.attach_money, Colors.green)),
+            Expanded(child: _statCard(theme, S.t(context, 'Total Hari Ini'), format.format(todayTotal), Icons.attach_money, Colors.green)),
           ],
         ),
         const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(child: _statCard(theme, 'Lunas', '$paidCount', Icons.check_circle, Colors.teal)),
+            Expanded(child: _statCard(theme, S.t(context, 'Lunas'), '$paidCount', Icons.check_circle, Colors.teal)),
             const SizedBox(width: 12),
-            Expanded(child: _statCard(theme, 'Belum Lunas', '${todayCount - paidCount}', Icons.pending, Colors.orange)),
+            Expanded(child: _statCard(theme, S.t(context, 'Belum Lunas'), '${todayCount - paidCount}', Icons.pending, Colors.orange)),
           ],
         ),
         const SizedBox(height: 16),
-        Text('Transaksi Terbaru', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+        Text(S.t(context, 'Transaksi Terbaru'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         if (op.isLoading)
           const Center(child: CircularProgressIndicator())
         else if (orders.isEmpty)
-          const Center(child: Text('Belum ada transaksi hari ini'))
+          Center(child: Text(S.t(context, 'Belum ada transaksi hari ini')))
         else
           ...orders.take(10).map((order) => Card(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -145,7 +158,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                   title: Text(order.orderNumber, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('${order.customerName ?? "Walk-in"} · ${order.items?.length ?? 0} item'),
+                  subtitle: Text(
+                      '${(order.customerName?.isNotEmpty ?? false) ? order.customerName : S.t(context, 'Walk-in')} · ${order.items?.length ?? 0} ${S.t(context, 'item')}'),
                   trailing: Text(format.format(order.totalAmount), style: TextStyle(fontWeight: FontWeight.w700, color: theme.colorScheme.primary)),
                 ),
               )),

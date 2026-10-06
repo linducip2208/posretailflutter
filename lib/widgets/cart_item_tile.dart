@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../l10n/s.dart';
 import '../../providers/cart_provider.dart';
 
 class CartItemTile extends StatefulWidget {
@@ -24,6 +25,29 @@ class CartItemTile extends StatefulWidget {
 
 class _CartItemTileState extends State<CartItemTile> {
   bool _showDiscount = false;
+  late final TextEditingController _discountCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _discountCtrl =
+        TextEditingController(text: '${widget.item.discountPercent}');
+  }
+
+  @override
+  void didUpdateWidget(covariant CartItemTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.discountPercent != widget.item.discountPercent &&
+        _discountCtrl.text != '${widget.item.discountPercent}') {
+      _discountCtrl.text = '${widget.item.discountPercent}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _discountCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +133,7 @@ class _CartItemTileState extends State<CartItemTile> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Text('Diskon:', style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
+                  Text('${S.t(context, 'Diskon')}:', style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
                   const SizedBox(width: 6),
                   SizedBox(
                     width: 60,
@@ -123,7 +147,7 @@ class _CartItemTileState extends State<CartItemTile> {
                       ),
                       keyboardType: TextInputType.number,
                       style: const TextStyle(fontSize: 11),
-                      controller: TextEditingController(text: '${widget.item.discountPercent}'),
+                      controller: _discountCtrl,
                       onChanged: (v) {
                         final pct = double.tryParse(v) ?? 0;
                         widget.onDiscountChanged(widget.index, pct);

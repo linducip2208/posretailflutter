@@ -254,19 +254,20 @@ class PrinterService {
                   pw.Expanded(flex: 3, child: pw.Text('Subtotal', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right)),
                 ],
               ),
-              ...items.map((item) => pw.Row(
-                    children: [
-                      pw.Expanded(flex: 5, child: pw.Text(
-                        (item['name'] as String).length > 18
-                            ? (item['name'] as String).substring(0, 18)
-                            : item['name'] as String,
-                        style: const pw.TextStyle(fontSize: 7),
-                      )),
-                      pw.Expanded(flex: 2, child: pw.Text('${item['qty']}', style: const pw.TextStyle(fontSize: 7))),
-                      pw.Expanded(flex: 3, child: pw.Text(format.format(item['price'] as double), style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right)),
-                      pw.Expanded(flex: 3, child: pw.Text(format.format(item['subtotal'] as double), style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right)),
-                    ],
-                  )),
+              ...items.map((item) {
+                final rawName = item['name']?.toString() ?? 'Item';
+                final name = rawName.length > 18 ? rawName.substring(0, 18) : rawName;
+                double toNum(dynamic v) =>
+                    v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0;
+                return pw.Row(
+                  children: [
+                    pw.Expanded(flex: 5, child: pw.Text(name, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Expanded(flex: 2, child: pw.Text('${item['qty'] ?? 0}', style: const pw.TextStyle(fontSize: 7))),
+                    pw.Expanded(flex: 3, child: pw.Text(format.format(toNum(item['price'])), style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right)),
+                    pw.Expanded(flex: 3, child: pw.Text(format.format(toNum(item['subtotal'])), style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right)),
+                  ],
+                );
+              }),
               pw.Divider(),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,

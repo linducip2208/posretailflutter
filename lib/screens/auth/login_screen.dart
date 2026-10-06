@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../l10n/s.dart';
 import '../../providers/auth_provider.dart';
-import '../pos/dashboard_screen.dart';
+import '../outlet/outlet_selection_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,7 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final ok = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
     if (ok && mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        MaterialPageRoute(builder: (_) => const OutletGate()),
       );
     } else if (mounted && auth.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -60,18 +61,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   Icon(Icons.store, size: 72, color: theme.colorScheme.primary),
                   const SizedBox(height: 16),
-                  Text('POS Retail', style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
+                  Text(S.t(context, 'POS Retail'), style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
-                  Text('Sistem Kasir Modern', style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+                  Text(S.t(context, 'Sistem Kasir Modern'), style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey)),
                   const SizedBox(height: 40),
 
                   TextField(
                     controller: _emailCtrl,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: S.t(context, 'Email'),
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -79,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _passCtrl,
                     obscureText: _obscure,
                     decoration: InputDecoration(
-                      labelText: 'Password',
+                      labelText: S.t(context, 'Password'),
                       prefixIcon: const Icon(Icons.lock_outlined),
                       border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
@@ -103,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: auth.isLoading
                           ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                          : Text(S.t(context, 'Masuk'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                     ),
                   ),
                   if (auth.error != null) ...[

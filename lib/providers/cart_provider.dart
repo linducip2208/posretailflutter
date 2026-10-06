@@ -116,16 +116,15 @@ class CartProvider extends ChangeNotifier {
   }
 
   Map<String, dynamic> toOrderPayload() {
+    // Sumber kebenaran = server: total/diskon/pajak dihitung ulang di
+    // CheckoutService. Client hanya kirim item + diskon% per item.
     return {
       'customer_id': _customerId,
       'items': _items.map((item) => {
         'product_id': item.product.id,
         'quantity': item.quantity,
-        'unit_price': item.unitPrice,
         'discount_percent': item.discountPercent,
       }).toList(),
-      'discount_amount': _totalDiscount,
-      'tax_amount': taxAmount,
     };
   }
 }

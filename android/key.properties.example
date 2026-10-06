@@ -1,0 +1,10 @@
+# Salin menjadi android/key.properties (JANGAN commit!) lalu isi:
+# storePassword=... (password keystore)
+# keyPassword=...   (password key)
+# keyAlias=posretail
+# storeFile=/path/ke/posretail-release.jks
+# Buat keystore: keytool -genkey -v -keystore posretail-release.jks -alias posretail -keyalg RSA -keysize 2048 -validity 10000
+storePassword=
+keyPassword=
+keyAlias=
+storeFile=

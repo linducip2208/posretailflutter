@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../l10n/s.dart';
 import '../../services/api_service.dart';
 
 class ReportScreen extends StatefulWidget {
@@ -73,7 +74,9 @@ class _ReportScreenState extends State<ReportScreen> {
       final payments = o['payments'] as List?;
       if (payments != null) {
         for (final p in payments) {
-          final name = p['payment_method']?['name'] ?? p['method_name'] ?? 'Unknown';
+          final name = p['payment_method']?['name']?.toString() ??
+              p['method_name']?.toString() ??
+              'Lainnya';
           paymentCounts[name] = (paymentCounts[name] ?? 0) + 1;
         }
       }
@@ -101,41 +104,44 @@ class _ReportScreenState extends State<ReportScreen> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            children: [
-              _periodChip('today', 'Hari Ini'),
-              const SizedBox(width: 8),
-              _periodChip('yesterday', 'Kemarin'),
-              const SizedBox(width: 8),
-              _periodChip('this_week', 'Minggu Ini'),
-              const SizedBox(width: 8),
-              _periodChip('this_month', 'Bulan Ini'),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _periodChip('today', S.t(context, 'Hari Ini')),
+                const SizedBox(width: 8),
+                _periodChip('yesterday', S.t(context, 'Kemarin')),
+                const SizedBox(width: 8),
+                _periodChip('this_week', S.t(context, 'Minggu Ini')),
+                const SizedBox(width: 8),
+                _periodChip('this_month', S.t(context, 'Bulan Ini')),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
 
-          Text('Ringkasan', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(S.t(context, 'Ringkasan'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Row(
             children: [
-              Expanded(child: _statCard(theme, 'Total Transaksi', '${_summary?['total_orders'] ?? 0}', Icons.receipt_long, Colors.blue)),
+              Expanded(child: _statCard(theme, S.t(context, 'Total Transaksi'), '${_summary?['total_orders'] ?? 0}', Icons.receipt_long, Colors.blue)),
               const SizedBox(width: 12),
-              Expanded(child: _statCard(theme, 'Total Revenue', format.format((_summary?['total_revenue'] ?? 0).toDouble()), Icons.attach_money, Colors.green)),
+              Expanded(child: _statCard(theme, S.t(context, 'Total Revenue'), format.format((_summary?['total_revenue'] ?? 0).toDouble()), Icons.attach_money, Colors.green)),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              Expanded(child: _statCard(theme, 'Lunas', '${_summary?['paid_orders'] ?? 0}', Icons.check_circle, Colors.teal)),
+              Expanded(child: _statCard(theme, S.t(context, 'Lunas'), '${_summary?['paid_orders'] ?? 0}', Icons.check_circle, Colors.teal)),
               const SizedBox(width: 12),
-              Expanded(child: _statCard(theme, 'Belum Lunas', '${_summary?['unpaid_orders'] ?? 0}', Icons.pending, Colors.orange)),
+              Expanded(child: _statCard(theme, S.t(context, 'Belum Lunas'), '${_summary?['unpaid_orders'] ?? 0}', Icons.pending, Colors.orange)),
             ],
           ),
           const SizedBox(height: 8),
-          _statCard(theme, 'Rata-rata Order', format.format((_summary?['avg_order'] ?? 0).toDouble()), Icons.trending_up, Colors.purple),
+          _statCard(theme, S.t(context, 'Rata-rata Order'), format.format((_summary?['avg_order'] ?? 0).toDouble()), Icons.trending_up, Colors.purple),
 
           const SizedBox(height: 24),
-          Text('Metode Pembayaran', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(S.t(context, 'Metode Pembayaran'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           if (_summary?['payment_counts'] != null)
             ...(_summary!['payment_counts'] as Map<String, int>).entries.map((e) => Card(
@@ -147,10 +153,10 @@ class _ReportScreenState extends State<ReportScreen> {
             )),
 
           const SizedBox(height: 24),
-          Text('Transaksi Terbaru', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(S.t(context, 'Transaksi Terbaru'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           if (_orders == null || _orders!.isEmpty)
-            const Center(child: Text('Belum ada transaksi', style: TextStyle(color: Colors.grey)))
+            Center(child: Text(S.t(context, 'Belum ada transaksi'), style: const TextStyle(color: Colors.grey)))
           else
             ..._orders!.take(20).map((o) => Card(
               margin: const EdgeInsets.only(bottom: 6),
@@ -160,7 +166,9 @@ class _ReportScreenState extends State<ReportScreen> {
                   child: Icon(o['payment_status'] == 'paid' ? Icons.check_circle : Icons.pending, color: o['payment_status'] == 'paid' ? Colors.green : Colors.orange, size: 20),
                 ),
                 title: Text(o['order_number'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                subtitle: Text(o['customer_name'] ?? 'Walk-in', style: const TextStyle(fontSize: 12)),
+                subtitle: Text((o['customer_name']?.toString().isNotEmpty ?? false)
+                    ? o['customer_name'].toString()
+                    : S.t(context, 'Walk-in'), style: const TextStyle(fontSize: 12)),
                 trailing: Text(format.format(double.tryParse((o['total_amount'] ?? 0).toString()) ?? 0), style: TextStyle(fontWeight: FontWeight.w700, color: theme.colorScheme.primary, fontSize: 13)),
               ),
             )),

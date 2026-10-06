@@ -1,3 +1,5 @@
+import '../utils/safe_parse.dart';
+
 class Product {
   final int id;
   final String name;
@@ -28,21 +30,23 @@ class Product {
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
-    double asDouble(dynamic value) => double.tryParse(value?.toString() ?? '') ?? 0;
-
+    final variants = json['variants'];
     return Product(
-      id: json['id'] ?? 0,
-      name: json['name'] ?? '',
-      sku: json['sku'],
-      barcode: json['barcode'],
-      sellingPrice: asDouble(json['selling_price']),
-      memberPrice: json['member_price'] != null ? asDouble(json['member_price']) : null,
-      wholesalePrice: json['wholesale_price'] != null ? asDouble(json['wholesale_price']) : null,
-      currentStock: int.tryParse(json['current_stock']?.toString() ?? '0') ?? 0,
-      image: json['image'],
-      categoryName: json['category'] != null ? json['category']['name'] : null,
-      unitName: json['unit'] != null ? json['unit']['name'] : null,
-      hasVariants: json['has_variants'] == true || json['has_variants'] == 1,
+      id: safeInt(json['id']),
+      name: safeString(json['name']),
+      sku: json['sku']?.toString(),
+      barcode: json['barcode']?.toString(),
+      sellingPrice: safeDouble(json['selling_price']),
+      memberPrice: json['member_price'] != null ? safeDouble(json['member_price']) : null,
+      wholesalePrice: json['wholesale_price'] != null ? safeDouble(json['wholesale_price']) : null,
+      currentStock: safeInt(json['current_stock']),
+      image: json['image']?.toString(),
+      categoryName: json['category'] is Map ? safeString(json['category']['name'], '') : null,
+      unitName: json['unit'] is Map ? safeString(json['unit']['name'], '') : null,
+      // Backend tidak mengirim has_variants — turunkan dari relasi variants bila ada.
+      hasVariants: json['has_variants'] == true ||
+          json['has_variants'] == 1 ||
+          (variants is List && variants.isNotEmpty),
     );
   }
 

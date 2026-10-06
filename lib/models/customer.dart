@@ -1,3 +1,5 @@
+import '../utils/safe_parse.dart';
+
 class Customer {
   final int id;
   final String name;
@@ -19,13 +21,15 @@ class Customer {
 
   factory Customer.fromJson(Map<String, dynamic> json) {
     return Customer(
-      id: json['id'] ?? 0,
-      name: json['name'] ?? '',
-      phone: json['phone'],
-      email: json['email'],
-      address: json['address'],
-      totalPoints: json['total_points'],
-      groupName: json['customer_group'] != null ? json['customer_group']['name'] : null,
+      id: safeInt(json['id']),
+      name: safeString(json['name']),
+      phone: json['phone']?.toString(),
+      email: json['email']?.toString(),
+      address: json['address']?.toString(),
+      totalPoints: json['total_points'] == null ? null : safeInt(json['total_points']),
+      groupName: json['customer_group'] is Map
+          ? safeString(json['customer_group']['name'], '')
+          : null,
     );
   }
 }

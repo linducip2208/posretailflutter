@@ -1,3 +1,5 @@
+import '../utils/safe_parse.dart';
+
 class OrderItem {
   final int id;
   final int productId;
@@ -16,15 +18,13 @@ class OrderItem {
   });
 
   factory OrderItem.fromJson(Map<String, dynamic> json) {
-    double asDouble(dynamic value) => double.tryParse(value?.toString() ?? '') ?? 0;
-
     return OrderItem(
-      id: json['id'] ?? 0,
-      productId: json['product_id'] ?? 0,
-      productName: json['product'] != null ? json['product']['name'] ?? '' : '',
-      quantity: int.tryParse(json['quantity']?.toString() ?? '0') ?? 0,
-      unitPrice: asDouble(json['unit_price']),
-      subtotal: asDouble(json['subtotal']),
+      id: safeInt(json['id']),
+      productId: safeInt(json['product_id']),
+      productName: json['product'] is Map ? safeString(json['product']['name']) : '',
+      quantity: safeInt(json['quantity']),
+      unitPrice: safeDouble(json['unit_price']),
+      subtotal: safeDouble(json['subtotal']),
     );
   }
 }
@@ -67,28 +67,34 @@ class Order {
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
-    double asDouble(dynamic value) => double.tryParse(value?.toString() ?? '') ?? 0;
-
     return Order(
-      id: json['id'] ?? 0,
-      orderNumber: json['order_number'] ?? '',
-      customerId: json['customer_id'],
-      customerName: json['customer_name'] ?? json['customer']?['name'],
-      outletId: json['outlet_id'] ?? 0,
-      outletName: json['outlet_name'] ?? json['outlet']?['name'],
-      queueNumber: json['queue_number'],
-      subtotal: asDouble(json['subtotal']),
-      discountAmount: asDouble(json['discount_amount']),
-      taxAmount: asDouble(json['tax_amount']),
-      totalAmount: asDouble(json['total_amount']),
-      paymentStatus: json['payment_status'] ?? 'unpaid',
-      orderStatus: json['order_status'] ?? 'pending',
-      createdAt: json['created_at'] ?? '',
-      items: json['items'] != null
-          ? (json['items'] as List).map((e) => OrderItem.fromJson(e)).toList()
+      id: safeInt(json['id']),
+      orderNumber: safeString(json['order_number']),
+      customerId: json['customer_id'] == null ? null : safeInt(json['customer_id']),
+      customerName: json['customer_name']?.toString() ??
+          (json['customer'] is Map ? safeString(json['customer']['name'], '') : null),
+      outletId: safeInt(json['outlet_id']),
+      outletName: json['outlet_name']?.toString() ??
+          (json['outlet'] is Map ? safeString(json['outlet']['name'], '') : null),
+      queueNumber: json['queue_number']?.toString(),
+      subtotal: safeDouble(json['subtotal']),
+      discountAmount: safeDouble(json['discount_amount']),
+      taxAmount: safeDouble(json['tax_amount']),
+      totalAmount: safeDouble(json['total_amount']),
+      paymentStatus: safeString(json['payment_status'], 'unpaid'),
+      orderStatus: safeString(json['order_status'], 'pending'),
+      createdAt: safeString(json['created_at']),
+      items: json['items'] is List
+          ? (json['items'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map(OrderItem.fromJson)
+              .toList()
           : null,
-      payments: json['payments'] != null
-          ? (json['payments'] as List).map((e) => Payment.fromJson(e)).toList()
+      payments: json['payments'] is List
+          ? (json['payments'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map(Payment.fromJson)
+              .toList()
           : null,
     );
   }
@@ -112,15 +118,15 @@ class Payment {
   });
 
   factory Payment.fromJson(Map<String, dynamic> json) {
-    double asDouble(dynamic value) => double.tryParse(value?.toString() ?? '') ?? 0;
-
     return Payment(
-      id: json['id'] ?? 0,
-      paymentMethodId: json['payment_method_id'] ?? 0,
-      methodName: json['payment_method'] != null ? json['payment_method']['name'] : null,
-      amount: asDouble(json['amount']),
-      status: json['status'] ?? 'pending',
-      paidAt: json['paid_at'],
+      id: safeInt(json['id']),
+      paymentMethodId: safeInt(json['payment_method_id']),
+      methodName: json['payment_method'] is Map
+          ? safeString(json['payment_method']['name'], '')
+          : null,
+      amount: safeDouble(json['amount']),
+      status: safeString(json['status'], 'pending'),
+      paidAt: json['paid_at']?.toString(),
     );
   }
 }

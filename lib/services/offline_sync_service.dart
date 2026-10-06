@@ -23,11 +23,14 @@ class OfflineSyncService {
     _listeners.remove(callback);
   }
 
+  static const int _maxAttempts = 10;
+
   Future<void> init() async {
     final dbPath = await getDatabasesPath();
-    _db = await openDatabase(p.join(dbPath, 'pos_offline.db'), version: 1,
+    _db = await openDatabase(p.join(dbPath, 'pos_offline.db'),
+        version: 2,
         onCreate: (db, version) async {
-      await db.execute('''
+          await db.execute('''
         CREATE TABLE products (
           id INTEGER PRIMARY KEY,
           name TEXT, sku TEXT, barcode TEXT,
@@ -35,15 +38,13 @@ class OfflineSyncService {
           image TEXT, category_name TEXT
         )
       ''');
-      await db.execute('''
-        CREATE TABLE offline_orders (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          payload TEXT,
-          created_at TEXT,
-          synced INTEGER DEFAULT 0
-        )
-      ''');
-    });
+          await _createOrdersTable(db);
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await _createOrdersTable(db);
+          }
+        });
 
     final connectivity = Connectivity();
     _isOnline = await _checkConnectivity();
@@ -107,37 +108,109 @@ class OfflineSyncService {
     return results.isNotEmpty ? results.first : null;
   }
 
-  // Queue order for later sync
+  Future<void> _createOrdersTable(Database db) async {
+    // Idempotent: aman dipanggil dari onCreate maupun onUpgrade.
+    final tables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_orders'");
+    if (tables.isEmpty) {
+      await db.execute('''
+        CREATE TABLE offline_orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          client_uuid TEXT,
+          payload TEXT,
+          created_at TEXT,
+          synced INTEGER DEFAULT 0,
+          attempts INTEGER DEFAULT 0,
+          last_error TEXT
+        )
+      ''');
+      return;
+    }
+    final cols = await db.rawQuery('PRAGMA table_info(offline_orders)');
+    final names = cols.map((c) => c['name'] as String).toSet();
+    if (!names.contains('client_uuid')) {
+      await db.execute('ALTER TABLE offline_orders ADD COLUMN client_uuid TEXT');
+    }
+    if (!names.contains('attempts')) {
+      await db.execute('ALTER TABLE offline_orders ADD COLUMN attempts INTEGER DEFAULT 0');
+    }
+    if (!names.contains('last_error')) {
+      await db.execute('ALTER TABLE offline_orders ADD COLUMN last_error TEXT');
+    }
+  }
+
+  // Queue order for later sync. client_uuid wajib (idempotency server).
   Future<void> queueOrder(Map<String, dynamic> payload) async {
     if (_db == null) return;
     await _db!.insert('offline_orders', {
+      'client_uuid': payload['client_uuid']?.toString(),
       'payload': jsonEncode(payload),
       'created_at': DateTime.now().toIso8601String(),
       'synced': 0,
     });
   }
 
-  // Sync pending orders when back online.
-  // Setiap payload benar-benar di-POST ke /orders dan hanya ditandai
-  // synced=1 jika server menerima (2xx). Gagal jaringan/validasi = tetap
-  // pending untuk dicoba lagi, jadi tidak ada penjualan offline yang hilang.
+  // Sync pending orders via /orders/sync-batch (idempoten via client_uuid).
+  // Hanya ditandai synced=1 jika server status created/duplicate.
+  // Gagal = attempts+1 + last_error; lewat batas → berhenti retry otomatis
+  // (tetap tampil di badge agar kasir tahu), tanpa loop infinite.
   Future<int> syncPendingOrders() async {
     if (_db == null || !_isOnline) return 0;
 
     final pending = await _db!.query('offline_orders',
-        where: 'synced = 0', orderBy: 'id ASC');
-    int synced = 0;
+        where: 'synced = 0 AND attempts < $_maxAttempts', orderBy: 'id ASC');
+    if (pending.isEmpty) return 0;
 
+    final entries = <Map<String, dynamic>>[];
     for (final order in pending) {
       try {
-        final payload =
-            Map<String, dynamic>.from(jsonDecode(order['payload'] as String));
-        await ApiService().post('/orders', body: payload);
-        await _db!.update('offline_orders', {'synced': 1},
-            where: 'id = ?', whereArgs: [order['id']]);
-        synced++;
+        entries.add(Map<String, dynamic>.from(
+            jsonDecode(order['payload'] as String)));
       } catch (_) {
-        // Biarkan pending — coba lagi di kesempatan berikutnya.
+        await _db!.update(
+            'offline_orders',
+            {'attempts': _maxAttempts, 'last_error': 'Payload rusak'},
+            where: 'id = ?',
+            whereArgs: [order['id']]);
+      }
+    }
+    if (entries.isEmpty) return 0;
+
+    Map<String, Map<String, dynamic>> byUuid = {};
+    try {
+      final res = await ApiService()
+          .post('/orders/sync-batch', body: {'orders': entries});
+      final data = res is Map ? res['data'] : null;
+      if (data is List) {
+        for (final r in data) {
+          if (r is Map) byUuid[r['client_uuid']?.toString() ?? ''] = Map<String, dynamic>.from(r);
+        }
+      }
+    } catch (_) {
+      // Jaringan mati di tengah jalan — semua tetap pending, coba lagi nanti.
+      return 0;
+    }
+
+    int synced = 0;
+    for (final order in pending) {
+      final uuid = order['client_uuid']?.toString() ?? '';
+      final r = byUuid[uuid];
+      if (r != null &&
+          (r['status'] == 'created' || r['status'] == 'duplicate')) {
+        await _db!.update('offline_orders', {
+          'synced': 1,
+          'last_error': null,
+        }, where: 'id = ?', whereArgs: [order['id']]);
+        synced++;
+      } else {
+        await _db!.update(
+            'offline_orders',
+            {
+              'attempts': ((order['attempts'] as int?) ?? 0) + 1,
+              'last_error': r?['message']?.toString() ?? 'Gagal sinkron',
+            },
+            where: 'id = ?',
+            whereArgs: [order['id']]);
       }
     }
     return synced;

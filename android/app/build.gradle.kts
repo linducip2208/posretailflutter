@@ -1,3 +1,7 @@
+import java.io.FileInputStream
+import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -15,26 +19,43 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.posretail.pos_retail"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // Release signing dari android/key.properties (TIDAK dicommit, lihat
+    // android/key.properties.example). Tanpa file itu, fallback ke debug key
+    // agar `flutter run --release` tetap jalan di mesin dev.
+    val keyPropsFile = rootProject.file("key.properties")
+    val hasReleaseKey = keyPropsFile.exists()
+    if (hasReleaseKey) {
+        val keyProps = Properties().apply {
+            load(FileInputStream(keyPropsFile))
+        }
+        signingConfigs {
+            create("release") {
+                keyAlias = keyProps["keyAlias"].toString()
+                keyPassword = keyProps["keyPassword"].toString()
+                storeFile = file(keyProps["storeFile"].toString())
+                storePassword = keyProps["storePassword"].toString()
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release")
+                else signingConfigs.getByName("debug")
         }
     }
 }

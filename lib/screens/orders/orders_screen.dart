@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../l10n/s.dart';
 import '../../models/order.dart';
 import '../../providers/order_provider.dart';
 import 'order_detail_screen.dart';
@@ -32,7 +33,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       child: op.isLoading
           ? const Center(child: CircularProgressIndicator())
           : op.orders.isEmpty
-              ? ListView(children: const [SizedBox(height: 200), Center(child: Text('Belum ada pesanan', style: TextStyle(color: Colors.grey)))])
+              ? ListView(children: [const SizedBox(height: 200), Center(child: Text(S.t(context, 'Belum ada pesanan'), style: const TextStyle(color: Colors.grey)))])
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
                   itemCount: op.orders.length,
@@ -62,7 +63,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      order.orderStatus,
+                                      _statusLabel(context, order.orderStatus),
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
@@ -73,7 +74,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                 ],
                               ),
                               const SizedBox(height: 6),
-                              Text('Customer: ${order.customerName ?? "Walk-in"}',
+                              Text(
+                                  '${S.t(context, 'Customer')}: ${(order.customerName?.isNotEmpty ?? false) ? order.customerName : S.t(context, 'Walk-in')}',
                                   style: theme.textTheme.bodySmall),
                               Text(format.format(order.totalAmount),
                                   style: theme.textTheme.titleMedium?.copyWith(
@@ -81,7 +83,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                     color: theme.colorScheme.primary,
                                   )),
                               Text(
-                                DateFormat('dd MMM yyyy, HH:mm').format(DateTime.parse(order.createdAt)),
+                                _formatDate(order.createdAt),
                                 style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
                               ),
                             ],
@@ -98,5 +100,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
     );
+  }
+
+  String _statusLabel(BuildContext context, String status) {
+    switch (status) {
+      case 'completed':
+        return S.t(context, 'Selesai');
+      case 'pending':
+        return S.t(context, 'Menunggu');
+      case 'processing':
+        return S.t(context, 'Diproses');
+      case 'cancelled':
+        return S.t(context, 'Dibatalkan');
+      case 'paid':
+        return S.t(context, 'Lunas');
+      case 'partial':
+        return S.t(context, 'Sebagian');
+      default:
+        return status;
+    }
+  }
+
+  String _formatDate(String raw) {
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return '-';
+    return DateFormat('dd MMM yyyy, HH:mm').format(dt);
   }
 }
