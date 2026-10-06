@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Tutorial Customize POS Retail</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Inter, sans-serif;
+    line-height: 1.7;
+    color: #1e293b;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 24px;
+    background: #fff;
+  }
+  h1 {
+    font-size: 28px;
+    color: #4f46e5;
+    border-bottom: 3px solid #4f46e5;
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+  }
+  h2 {
+    font-size: 20px;
+    color: #4338ca;
+    margin-top: 36px;
+    margin-bottom: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  h3 {
+    font-size: 16px;
+    color: #334155;
+    margin-top: 20px;
+  }
+  p { margin-bottom: 12px; }
+  ul, ol { margin: 8px 0 16px 24px; }
+  li { margin-bottom: 6px; }
+  code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    font-size: 13px;
+    color: #be123c;
+  }
+  pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 12px 0 20px;
+  }
+  .file-path {
+    background: #fef3c7;
+    border-left: 4px solid #f59e0b;
+    padding: 8px 12px;
+    margin: 12px 0;
+    font-family: monospace;
+    font-size: 13px;
+    color: #92400e;
+  }
+  .warning {
+    background: #fee2e2;
+    border-left: 4px solid #dc2626;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .tip {
+    background: #ecfdf5;
+    border-left: 4px solid #10b981;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .step {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+  }
+  .step-number {
+    display: inline-block;
+    background: #4f46e5;
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 28px;
+    font-weight: bold;
+    font-size: 14px;
+    margin-right: 8px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid #e2e8f0;
+    padding: 10px 14px;
+    text-align: left;
+  }
+  th {
+    background: #f1f5f9;
+    font-weight: 600;
+  }
+  .toc {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 20px 0;
+  }
+  .toc a { color: #4f46e5; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin-bottom: 4px; }
+
+  @media print {
+    body { padding: 0 20px; }
+    h2 { page-break-before: always; }
+    h2:first-of-type { page-break-before: avoid; }
+    pre { white-space: pre-wrap; word-wrap: break-word; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Tutorial Customize Aplikasi POS Retail</h1>
+<p style="color:#64748b; font-size:14px;">
+  Panduan lengkap mengubah domain, nama aplikasi, icon, package name, warna tema,
+  dan splash screen pada aplikasi Flutter POS Retail. Cocok untuk whitelabel / rebranding.
+</p>
+
+<div class="toc">
+<strong>Daftar Isi</strong>
+<ol>
+  <li><a href="#domain">Mengubah Domain / URL API Backend</a></li>
+  <li><a href="#backend">Setup Laravel Backend</a></li>
+  <li><a href="#nama">Mengubah Nama Aplikasi</a></li>
+  <li><a href="#icon">Mengubah Icon Aplikasi</a></li>
+  <li><a href="#package">Mengubah Package Name / Bundle ID</a></li>
+  <li><a href="#warna">Mengubah Warna Tema</a></li>
+  <li><a href="#splash">Mengubah Splash Screen</a></li>
+  <li><a href="#versi">Mengubah Versi Aplikasi</a></li>
+  <li><a href="#ringkasan">Ringkasan File yang Perlu Diedit</a></li>
+</ol>
+</div>
+
+<!-- ================================================================== -->
+<h2 id="domain">1. Mengubah Domain / URL API Backend</h2>
+
+<p>
+  Aplikasi ini terhubung ke Laravel backend melalui REST API. Domain harus diubah
+  di <strong>2 file</strong>:
+</p>
+
+<div class="step">
+<span class="step-number">1</span> <strong>File utama — konfigurasi API</strong>
+<div class="file-path">File: lib/config/api_config.dart</div>
+<pre>class ApiConfig {
+  // GANTI baris di bawah ini dengan domain Anda sendiri:
+  static const String baseUrl = 'https://YOUR-DOMAIN.com/api/v1';
+  //                              ^^^^^^^^^^^^^^^^^^^^^^^^
+  // Contoh: 'https://posretail.whitelabel.co.id/api/v1'
+  //         'https://api.tokokita.com/api/v1'
+
+  static const Duration connectTimeout = Duration(seconds: 15);
+  static const Duration receiveTimeout = Duration(seconds: 15);
+}</pre>
+<p>File ini adalah <strong>sumber utama</strong> — semua API call di aplikasi (login, produk, order, dll) membaca <code>ApiConfig.baseUrl</code> dari sini.</p>
+</div>
+
+<div class="step">
+<span class="step-number">2</span> <strong>File tampilan — halaman Settings</strong>
+<div class="file-path">File: lib/screens/settings/settings_screen.dart</div>
+<pre>import '../../config/api_config.dart';    &lt;!-- PASTIKAN import ini ada
+
+class _SettingsScreenState extends State&lt;SettingsScreen&gt; {
+  String _apiUrl = ApiConfig.baseUrl;    &lt;!-- PASTIKAN pakai ApiConfig
+  ...</pre>
+<p>Halaman Settings menampilkan URL API yang sedang aktif dan sudah membaca dari <code>ApiConfig.baseUrl</code>. Jika import <code>api_config.dart</code> tidak ada, tambahkan.</p>
+</div>
+
+<div class="tip">
+<strong>Tips:</strong>
+<ul>
+  <li>Gunakan <code>https://</code> (bukan http) untuk production</li>
+  <li>Pastikan Laravel backend sudah di-deploy dan endpoint <code>/api/v1/login</code> berfungsi</li>
+  <li>Untuk development di emulator Android, gunakan <code>http://10.0.2.2:8765/api/v1</code></li>
+  <li>Untuk development di HP fisik, gunakan IP lokal laptop: <code>http://192.168.x.x:8765/api/v1</code></li>
+</ul>
+</div>
+
+
+<!-- ================================================================== -->
+<h2 id="backend">2. Setup Laravel Backend</h2>
+
+<p>
+  Aplikasi Flutter POS Retail membutuhkan <strong>Laravel backend</strong> yang berjalan di domain
+  yang sama dengan <code>baseUrl</code> di atas. Backend ini menyediakan REST API
+  untuk login, produk, order, customer, dan payment gateway.
+</p>
+
+<div class="step">
+<span class="step-number">1</span> <strong>Clone / pindahkan project Laravel</strong>
+<p>Project Laravel backend berada di folder terpisah. Pindahkan ke server atau jalankan secara lokal:</p>
+<pre># Masuk ke folder Laravel backend
+cd D:\project laravel\pos-retail
+
+# Copy .env.example ke .env (jika belum ada)
+copy .env.example .env
+
+# Install dependencies
+composer install
+
+# Generate APP_KEY
+php artisan key:generate
+
+# Setup database di .env (DB_DATABASE, DB_USERNAME, DB_PASSWORD)
+# Lalu migrate + seed
+php artisan migrate --seed
+
+# Jalankan development server (port 8765)
+php artisan serve --host=127.0.0.1 --port=8765</pre>
+</div>
+
+<div class="step">
+<span class="step-number">2</span> <strong>Konfigurasi CORS (wajib!)</strong>
+<p>Agar Flutter app bisa akses API dari domain berbeda, Laravel harus mengizinkan CORS.</p>
+<div class="file-path">File: config/cors.php (Laravel 11) atau bootstrap/app.php</div>
+<pre>// Laravel 11 — di bootstrap/app.php, tambahkan middleware CORS
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->api(prepend: [
+        \Illuminate\Http\Middleware\HandleCors::class,
+    ]);
+})
+
+// Lalu di config/cors.php:
+return [
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'allowed_methods' => ['*'],
+    'allowed_origins' => ['*'],               // ganti dengan domain Flutter nanti
+    'allowed_headers' => ['*'],
+    'exposed_headers' => [],
+    'max_age' => 0,
+    'supports_credentials' => false,
+];</pre>
+</div>
+
+<div class="step">
+<span class="step-number">3</span> <strong>Setup Sanctum (API Token Auth)</strong>
+<div class="file-path">File: routes/api.php</div>
+<pre>Route::prefix('v1')->group(function () {
+    Route::post('/login', [AuthController::class, 'login']);  // tanpa auth
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/user', [AuthController::class, 'user']);
+        Route::post('/logout', [AuthController::class, 'logout']);
+        Route::get('/products', [ProductController::class, 'index']);
+        Route::post('/orders', [OrderController::class, 'store']);
+        Route::get('/customers', [CustomerController::class, 'index']);
+        // ... dan lainnya
+    });
+});</pre>
+</div>
+
+<div class="step">
+<span class="step-number">4</span> <strong>Deploy ke Server / Domain</strong>
+<p>Untuk production, deploy Laravel ke web server (Nginx/Apache) yang melayani domain Anda:</p>
+<pre># Contoh Nginx config
+server {
+    listen 80;
+    server_name posretail.whitelabel.co.id;
+
+    root /var/www/pos-retail/public;
+    index index.php;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+}</pre>
+</div>
+
+<div class="warning">
+<strong>Cek koneksi:</strong> Setelah backend online, test API login dari browser atau terminal:<br><br>
+<code>curl -X POST https://YOUR-DOMAIN.com/api/v1/login -H "Content-Type: application/json" -d '{"email":"admin@test.com","password":"password"}'</code><br><br>
+Jika return JSON dengan token, backend sudah siap. Jika return 404 atau error lain, cek konfigurasi web server dan <code>.env</code> (APP_URL harus sesuai domain).
+</div>
+
+<div class="tip">
+<strong>Database yang perlu di-seed:</strong>
+<ul>
+  <li>Tabel <code>users</code> — akun login (admin, kasir, manager)</li>
+  <li>Tabel <code>products</code> — daftar produk beserta barcode, harga, stok</li>
+  <li>Tabel <code>categories</code> — kategori produk</li>
+  <li>Tabel <code>customers</code> — data pelanggan (opsional)</li>
+  <li>Tabel <code>payment_methods</code> — metode pembayaran (cash, QRIS, transfer)</li>
+  <li>Tabel <code>tables</code> — meja resto (jika pakai fitur meja)</li>
+  <li>Tabel <code>personal_access_tokens</code> — token Sanctum (auto-migrate)</li>
+</ul>
+</div>
+
+<!-- ================================================================== -->
+<h2 id="nama">3. Mengubah Nama Aplikasi</h2>
+
+<p>Nama aplikasi muncul di 4 tempat berbeda. Semua harus diganti:</p>
+
+<h3>2A. Nama di Layar HP (Android)</h3>
+<div class="file-path">File: android/app/src/main/AndroidManifest.xml</div>
+<pre>&lt;application
+    android:label="<strong>Nama App Anda</strong>"    &lt;!-- GANTI di sini -->
+    android:name="${applicationName}"
+    android:icon="@mipmap/ic_launcher"&gt;</pre>
+
+<h3>2B. Nama di Layar HP (iOS)</h3>
+<div class="file-path">File: ios/Runner/Info.plist</div>
+<pre>&lt;key&gt;CFBundleDisplayName&lt;/key&gt;
+&lt;string&gt;<strong>Nama App Anda</strong>&lt;/string&gt;   &lt;!-- GANTI di sini -->
+
+&lt;key&gt;CFBundleName&lt;/key&gt;
+&lt;string&gt;<strong>nama_app_anda</strong>&lt;/string&gt;      &lt;!-- GANTI di sini, pakai underscore --></pre>
+
+<h3>2C. Nama di Title Bar Flutter</h3>
+<div class="file-path">File: lib/main.dart</div>
+<pre>MaterialApp(
+  title: '<strong>Nama App Anda</strong>',   // GANTI di sini
+  ...
+)</pre>
+
+<h3>2D. Nama di Splash Screen</h3>
+<div class="file-path">File: lib/main.dart (bagian SplashScreen)</div>
+<pre>const Text('<strong>Nama App Anda</strong>',    // GANTI di sini
+  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),</pre>
+
+
+<!-- ================================================================== -->
+<h2 id="icon">3. Mengubah Icon Aplikasi</h2>
+
+<p>Icon aplikasi adalah gambar yang muncul di home screen HP. Cara termudah adalah
+menggunakan package <code>flutter_launcher_icons</code>.</p>
+
+<h3>Langkah 1 — Tambahkan dependency</h3>
+<div class="file-path">File: pubspec.yaml (bagian dev_dependencies)</div>
+<pre>dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3     &lt;!-- TAMBAHKAN baris ini --></pre>
+
+<h3>Langkah 2 — Tambahkan konfigurasi icon</h3>
+<div class="file-path">File: pubspec.yaml (di bagian bawah, SEJAJAR dengan flutter:)</div>
+<pre>flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app-icon.png"      &lt;!-- path ke icon Anda -->
+  adaptive_icon_background: "#FFFFFF"          &lt;!-- warna background (opsional) -->
+  adaptive_icon_foreground: "assets/icon/app-icon.png"</pre>
+
+<h3>Langkah 3 — Siapkan file icon</h3>
+<p>
+  Buat folder <code>assets/icon/</code> dan letakkan file PNG icon Anda di sana.
+  <strong>Ukuran minimum: 1024x1024 px</strong> (tanpa background, transparan).
+</p>
+
+<h3>Langkah 4 — Generate icon</h3>
+<pre>flutter pub get
+flutter pub run flutter_launcher_icons</pre>
+
+<p>Command ini otomatis generate semua ukuran icon untuk Android (mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi)
+dan iOS (semua AppIcon.appiconset).</p>
+
+<div class="warning">
+<strong>Alternatif manual (tanpa package):</strong><br>
+Icon Android ada di <code>android/app/src/main/res/mipmap-*/ic_launcher.png</code> — 
+ganti semua 5 file PNG tersebut dengan icon Anda (ukuran: 48, 72, 96, 144, 192 px).<br><br>
+Icon iOS ada di <code>ios/Runner/Assets.xcassets/AppIcon.appiconset/</code> — 
+ganti semua file PNG sesuai ukuran yang terdaftar di <code>Contents.json</code>.
+</div>
+
+
+<!-- ================================================================== -->
+<h2 id="package">4. Mengubah Package Name / Bundle ID</h2>
+
+<p>
+  Package name adalah identitas unik aplikasi di Play Store / App Store.
+  Format: <code>com.namaperusahaan.namaaplikasi</code>. <strong>Wajib diganti</strong> sebelum rilis.
+</p>
+
+<h3>Android: applicationId</h3>
+<div class="file-path">File: android/app/build.gradle.kts</div>
+<pre>defaultConfig {
+    applicationId = "com.tokokita.pos_app"    &lt;!-- GANTI di sini -->
+    ...
+}</pre>
+
+<p>
+  Juga update <code>namespace</code> di file yang sama (baris 9):
+</p>
+<pre>android {
+    namespace = "com.tokokita.pos_app"          &lt;!-- GANTI di sini -->
+    ...
+}</pre>
+
+<p>
+  Dan update folder struktur <code>MainActivity.kt</code> sesuai package name baru:
+</p>
+<pre>android/app/src/main/kotlin/com/<strong>tokokita/pos_app</strong>/MainActivity.kt
+                                         ^^^^^^^^^^^^^^^^^^^^
+                                         sesuaikan dengan applicationId</pre>
+
+<h3>iOS: Bundle Identifier</h3>
+<div class="file-path">File: ios/Runner.xcodeproj/project.pbxproj</div>
+<p>
+  Cari <code>PRODUCT_BUNDLE_IDENTIFIER</code> (ada 3 tempat: Debug, Release, Profile)
+  dan ganti nilainya. Atau lebih mudah: buka di Xcode &rarr; Runner target &rarr;
+  General &rarr; Bundle Identifier.
+</p>
+
+<div class="tip">
+<strong>Aturan penamaan package:</strong>
+<ul>
+  <li>Harus lowercase (huruf kecil semua)</li>
+  <li>Dibatasi dengan titik: <code>com.nama.namaapp</code></li>
+  <li>Tidak boleh pakai angka di depan</li>
+  <li>Harus unik — tidak boleh sama dengan app lain di Play Store</li>
+</ul>
+</div>
+
+
+<!-- ================================================================== -->
+<h2 id="warna">5. Mengubah Warna Tema</h2>
+
+<p>Aplikasi ini menggunakan Material 3 dengan <code>colorSchemeSeed</code>.
+Cukup ganti satu warna, seluruh tema otomatis menyesuaikan (light + dark).</p>
+
+<div class="file-path">File: lib/main.dart</div>
+
+<pre>MaterialApp(
+  title: 'POS Retail',
+  debugShowCheckedModeBanner: false,
+  theme: ThemeData(
+    colorSchemeSeed: const Color(0xFF<strong>4F46E5</strong>),  &lt;!-- GANTI warna di sini -->
+    useMaterial3: true,
+    brightness: Brightness.light,
+  ),
+  darkTheme: ThemeData(
+    colorSchemeSeed: const Color(0xFF<strong>4F46E5</strong>),  &lt;!-- GANTI warna di sini -->
+    useMaterial3: true,
+    brightness: Brightness.dark,
+  ),
+  ...
+)</pre>
+
+<table>
+  <tr><th>Warna</th><th>Hex Code</th><th>Cocok untuk</th></tr>
+  <tr><td>Indigo</td><td><code>0xFF4F46E5</code></td><td>Default, profesional</td></tr>
+  <tr><td>Biru</td><td><code>0xFF2563EB</code></td><td>Corporate, finance</td></tr>
+  <tr><td>Hijau</td><td><code>0xFF16A34A</code></td><td>Retail, grocery</td></tr>
+  <tr><td>Orange</td><td><code>0xFFEA580C</code></td><td>F&B, restaurant</td></tr>
+  <tr><td>Merah</td><td><code>0xFFDC2626</code></td><td>Bold, energic</td></tr>
+  <tr><td>Ungu</td><td><code>0xFF9333EA</code></td><td>Creative, fashion</td></tr>
+  <tr><td>Teal</td><td><code>0xFF0D9488</code></td><td>Health, pharmacy</td></tr>
+  <tr><td>Pink</td><td><code>0xFFDB2777</code></td><td>Beauty, cosmetics</td></tr>
+</table>
+
+<div class="tip">
+<strong>Tips:</strong> Gunakan <a href="https://m3.material.io/theme-builder" style="color:#4f46e5">Material Theme Builder</a>
+untuk preview warna tema Anda sebelum diterapkan ke kode.
+</div>
+
+
+<!-- ================================================================== -->
+<h2 id="splash">6. Mengubah Splash Screen</h2>
+
+<p>Splash screen adalah tampilan yang muncul sebelum aplikasi terbuka penuh.</p>
+
+<h3>Android: Warna Background Splash</h3>
+<div class="file-path">File: android/app/src/main/res/values/styles.xml</div>
+<pre>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;resources&gt;
+    &lt;style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar"&gt;
+        &lt;item name="android:windowBackground"&gt;@drawable/launch_background&lt;/item&gt;
+    &lt;/style&gt;
+&lt;/resources&gt;</pre>
+
+<div class="file-path">File: android/app/src/main/res/drawable/launch_background.xml</div>
+<pre>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;layer-list xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;item android:drawable="@android:color/<strong>white</strong>" /&gt;   &lt;!-- GANTI warna background -->
+&lt;/layer-list&gt;</pre>
+
+<h3>iOS: Launch Screen</h3>
+<div class="file-path">File: ios/Runner/Base.lproj/LaunchScreen.storyboard</div>
+<p>
+  Buka di Xcode untuk edit visual, atau edit langsung XML-nya
+  untuk mengubah warna background dan gambar.
+</p>
+
+<h3>Custom Splash Screen (dalam Flutter)</h3>
+<p>
+  Splash screen di Flutter ada di <code>lib/main.dart</code> pada class <code>SplashScreen</code>.
+  Anda bisa ganti icon dan teks:
+</p>
+<pre>class SplashScreen extends StatefulWidget {
+  ...
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // GANTI icon di bawah:
+            Icon(Icons.store, size: 80, color: Theme.of(context).colorScheme.primary),
+            //              ^^^^^^^^
+            // Alternatif: Image.asset('assets/logo.png', width: 120),
+            
+            const SizedBox(height: 16),
+            // GANTI teks di bawah:
+            const Text('POS Retail', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+            //           ^^^^^^^^^^^
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      ),
+    );
+  }
+}</pre>
+
+
+<!-- ================================================================== -->
+<h2 id="versi">7. Mengubah Versi Aplikasi</h2>
+
+<div class="file-path">File: pubspec.yaml (baris 19)</div>
+<pre>version: 1.0.0+1
+#         ^^^^^ ^^
+#         |     └─ build number (integer, auto-increment tiap upload ke store)
+#         └─────── version name (major.minor.patch)</pre>
+
+<p>Contoh: <code>version: 2.1.0+5</code> artinya versi 2.1.0, build ke-5.</p>
+
+<div class="warning">
+<strong>PENTING:</strong> Build number HARUS selalu naik (tidak boleh turun/reset)
+saat upload ke Google Play Store dan Apple App Store. Jika tidak, upload akan ditolak.
+</div>
+
+
+<!-- ================================================================== -->
+<h2 id="ringkasan">8. Ringkasan File yang Perlu Diedit</h2>
+
+<table>
+  <tr>
+    <th>Yang Diubah</th>
+    <th>File</th>
+    <th>Yang Diedit</th>
+  </tr>
+  <tr>
+    <td>Domain API</td>
+    <td><code>lib/config/api_config.dart</code></td>
+    <td><code>baseUrl</code></td>
+  </tr>
+  <tr>
+    <td>Nama App (Android)</td>
+    <td><code>android/app/src/main/AndroidManifest.xml</code></td>
+    <td><code>android:label</code></td>
+  </tr>
+  <tr>
+    <td>Nama App (iOS)</td>
+    <td><code>ios/Runner/Info.plist</code></td>
+    <td><code>CFBundleDisplayName</code> + <code>CFBundleName</code></td>
+  </tr>
+  <tr>
+    <td>Nama App (Flutter)</td>
+    <td><code>lib/main.dart</code></td>
+    <td><code>title</code> + teks <code>SplashScreen</code></td>
+  </tr>
+  <tr>
+    <td>Icon Aplikasi</td>
+    <td><code>pubspec.yaml</code> + <code>assets/icon/</code></td>
+    <td>Konfigurasi <code>flutter_launcher_icons</code></td>
+  </tr>
+  <tr>
+    <td>Package Name (Android)</td>
+    <td><code>android/app/build.gradle.kts</code></td>
+    <td><code>applicationId</code> + <code>namespace</code></td>
+  </tr>
+  <tr>
+    <td>Package Name (iOS)</td>
+    <td><code>ios/Runner.xcodeproj/project.pbxproj</code></td>
+    <td><code>PRODUCT_BUNDLE_IDENTIFIER</code></td>
+  </tr>
+  <tr>
+    <td>Warna Tema</td>
+    <td><code>lib/main.dart</code></td>
+    <td><code>colorSchemeSeed</code></td>
+  </tr>
+  <tr>
+    <td>Splash Background</td>
+    <td><code>android/.../launch_background.xml</code></td>
+    <td><code>android:drawable</code> warna</td>
+  </tr>
+  <tr>
+    <td>Splash Flutter</td>
+    <td><code>lib/main.dart</code></td>
+    <td>Class <code>SplashScreen</code></td>
+  </tr>
+  <tr>
+    <td>Versi</td>
+    <td><code>pubspec.yaml</code></td>
+    <td><code>version: x.y.z+build</code></td>
+  </tr>
+</table>
+
+<hr style="margin: 40px 0; border: none; border-top: 1px solid #e2e8f0;">
+
+<h2>Build APK / App Bundle</h2>
+
+<p>Setelah semua perubahan selesai, build aplikasi:</p>
+
+<pre># Build APK (untuk testing / distribusi langsung)
+flutter build apk --release
+
+# Build App Bundle (untuk upload ke Google Play Store)
+flutter build appbundle --release
+
+# Build iOS (harus dari macOS + Xcode)
+flutter build ios --release</pre>
+
+<p style="margin-top: 16px;">
+  Output APK: <code>build/app/outputs/flutter-apk/app-release.apk</code><br>
+  Output AAB: <code>build/app/outputs/bundle/release/app-release.aab</code>
+</p>
+
+<hr style="margin: 40px 0; border: none; border-top: 1px solid #e2e8f0;">
+
+<p style="text-align: center; color: #94a3b8; font-size: 13px;">
+  Tutorial untuk POS Retail Flutter App &mdash; Dibuat Juni 2026<br>
+  Domain default: posretail.whitelabel.co.id
+</p>
+
+</body>
+</html>

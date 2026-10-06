@@ -1,0 +1,152 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["D:\\project flutter\\pos-retail\\ECC-temp\\.opencode\\dist\\index.js"],
+  "instructions": [
+    "ECC-temp/AGENTS.md",
+    "ECC-temp/.opencode/instructions/INSTRUCTIONS.md"
+  ],
+  "skills": {
+    "paths": [
+      "ECC-temp/skills",
+      "C:\\Users\\lindu cipta\\.opencode\\skills"
+    ]
+  },
+  "agent": {
+    "build": {
+      "description": "Primary coding agent for Flutter development",
+      "mode": "primary",
+      "model": "anthropic/claude-sonnet-4-5",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true,
+        "read": true,
+        "changed-files": true
+      }
+    },
+    "planner": {
+      "description": "Implementation planning for complex Flutter features",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/planner.txt}",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "architect": {
+      "description": "System design for mobile + backend architecture",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/architect.txt}",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "code-reviewer": {
+      "description": "Code review for Flutter/Dart quality and maintainability",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/code-reviewer.txt}",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    },
+    "security-reviewer": {
+      "description": "Security review for Flutter apps and API backends",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/security-reviewer.txt}",
+      "tools": { "read": true, "bash": true, "write": true, "edit": true }
+    },
+    "tdd-guide": {
+      "description": "TDD for Flutter widget/unit tests",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/tdd-guide.txt}",
+      "tools": { "read": true, "write": true, "edit": true, "bash": true }
+    },
+    "build-error-resolver": {
+      "description": "Flutter/Dart build error resolution",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/build-error-resolver.txt}",
+      "tools": { "read": true, "write": true, "edit": true, "bash": true }
+    },
+    "database-reviewer": {
+      "description": "MySQL database schema review and query optimization",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/database-reviewer.txt}",
+      "tools": { "read": true, "write": true, "edit": true, "bash": true }
+    },
+    "doc-updater": {
+      "description": "Documentation and codemap updates",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/doc-updater.txt}",
+      "tools": { "read": true, "write": true, "edit": true, "bash": true }
+    },
+    "refactor-cleaner": {
+      "description": "Dead code and duplicate cleanup",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/refactor-cleaner.txt}",
+      "tools": { "read": true, "write": true, "edit": true, "bash": true }
+    },
+    "e2e-runner": {
+      "description": "E2E testing for Flutter integration tests",
+      "mode": "subagent",
+      "model": "anthropic/claude-opus-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/e2e-runner.txt}",
+      "tools": { "read": true, "write": true, "edit": true, "bash": true }
+    },
+    "docs-lookup": {
+      "description": "Flutter/Dart/MySQL API documentation lookup",
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt": "{file:ECC-temp/.opencode/prompts/agents/docs-lookup.txt}",
+      "tools": { "read": true, "bash": true, "write": false, "edit": false }
+    }
+  },
+  "command": {
+    "plan": {
+      "description": "Create implementation plan for complex features",
+      "template": "{file:ECC-temp/.opencode/commands/plan.md}\n\n$ARGUMENTS",
+      "agent": "planner",
+      "subtask": true
+    },
+    "tdd": {
+      "description": "TDD workflow for Flutter tests",
+      "template": "{file:ECC-temp/.opencode/commands/tdd.md}\n\n$ARGUMENTS",
+      "agent": "tdd-guide",
+      "subtask": true
+    },
+    "code-review": {
+      "description": "Review Flutter/Dart code",
+      "template": "{file:ECC-temp/.opencode/commands/code-review.md}\n\n$ARGUMENTS",
+      "agent": "code-reviewer",
+      "subtask": true
+    },
+    "security": {
+      "description": "Security review for Flutter app",
+      "template": "{file:ECC-temp/.opencode/commands/security.md}\n\n$ARGUMENTS",
+      "agent": "security-reviewer",
+      "subtask": true
+    },
+    "build-fix": {
+      "description": "Fix Flutter/Dart build errors",
+      "template": "{file:ECC-temp/.opencode/commands/build-fix.md}\n\n$ARGUMENTS",
+      "agent": "build-error-resolver",
+      "subtask": true
+    },
+    "refactor-clean": {
+      "description": "Remove dead code and consolidate",
+      "template": "{file:ECC-temp/.opencode/commands/refactor-clean.md}\n\n$ARGUMENTS",
+      "agent": "refactor-cleaner",
+      "subtask": true
+    },
+    "update-docs": {
+      "description": "Update project documentation",
+      "template": "{file:ECC-temp/.opencode/commands/update-docs.md}\n\n$ARGUMENTS",
+      "agent": "doc-updater",
+      "subtask": true
+    }
+  },
+  "permission": {
+    "mcp_*": "ask"
+  }
+}
