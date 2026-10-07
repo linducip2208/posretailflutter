@@ -55,7 +55,8 @@ class _PosScreenState extends State<PosScreen> {
     _isOnline = _offline.isOnline;
     _connectivityListener = (online) {
       if (mounted) setState(() => _isOnline = online);
-      if (online) _syncPending();
+      // Otomatis: hormati backoff. Manual (badge): force via _syncPending().
+      if (online) _syncPending(force: false);
     };
     _offline.addListener(_connectivityListener);
     _loadProducts();
@@ -67,9 +68,10 @@ class _PosScreenState extends State<PosScreen> {
     if (mounted) setState(() => _pendingSyncCount = n);
   }
 
-  Future<void> _syncPending() async {
+  Future<void> _syncPending({bool force = true}) async {
     final en = context.read<LangProvider>().isEnglish;
-    final sent = await _offline.syncPendingOrders();
+    // Aksi manual kasir (badge/connectivity) memakai force agar langsung coba.
+    final sent = await _offline.syncPendingOrders(force: force);
     await _refreshPendingCount();
     if (mounted && sent > 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -562,7 +564,7 @@ class _PosScreenState extends State<PosScreen> {
                         avatar: const Icon(Icons.sync_problem, size: 14),
                         label: Text('$_pendingSyncCount ${S.t(context, 'menunggu kirim')}',
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                        onPressed: _isOnline ? _syncPending : null,
+                        onPressed: _isOnline ? () => _syncPending(force: true) : null,
                       ),
                     ],
                     const Spacer(),
