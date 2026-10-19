@@ -180,7 +180,7 @@ Catatan: `flutter_launcher_icons` **tidak dipakai** — versi yang kompatibel de
 | Perintah | Hasil |
 |----------|-------|
 | `flutter pub get` | ✅ sukses |
-| `dart format lib test` | ✅ dijalankan (62 file; seluruh file baru diformat) |
+| `dart format lib test` | ✅ dijalankan (68 file; 0 perubahan pada verifikasi akhir) |
 | `flutter analyze` | ✅ **No issues found** |
 | `flutter test` | ✅ **53/53 pass** (18 test lama tetap hijau + 35 test baru) |
 | `flutter build apk --release` | ✅ `build\app\outputs\flutter-apk\app-release.apk` (71,9 MB, fat APK semua ABI) |
@@ -204,8 +204,9 @@ Catatan: `flutter_launcher_icons` **tidak dipakai** — versi yang kompatibel de
 
 ### 6.3 Batasan pengujian (jujur, tanpa klaim palsu)
 
-- Seluruh test di atas memakai **mock HTTP** (`MockClient`) dan DB in-memory — **bukan** integrasi nyata ke backend produksi.
-- Tidak ada device/emulator Android dalam sesi ini → alur end-to-end (login nyata → checkout nyata → cetak struk) **BLOCKED**, harus diuji di staging dengan kredensial dan printer.
+- Test otomatis memakai **mock HTTP** (`MockClient`) dan DB in-memory — **bukan** integrasi nyata ke backend produksi.
+- Uji asap **perangkat nyata (emulator)** sudah dilakukan: splash → layar Masuk → percobaan login nyata ke API produksi (§6.5). Ini membuktikan aplikasi release berjalan di Android — **bukan** klaim integrasi checkout end-to-end.
+- Alur end-to-end penuh (login sukses → outlet → checkout → cetak struk) **BLOCKED**: butuh kredensial staging dan printer.
 - Bluetooth printer tidak dapat diuji di sini → BLOCKED.
 
 ### 6.4 Bug yang ditemukan & diperbaiki selama verifikasi
@@ -213,15 +214,29 @@ Catatan: `flutter_launcher_icons` **tidak dipakai** — versi yang kompatibel de
 | Bug | Ditemukan oleh | Perbaikan |
 |-----|----------------|-----------|
 | `PaymentDialog` melempar `RangeError` saat daftar metode pembayaran kosong/gagal dimuat (`_active` mengakses `_entries[0]` yang kosong) | Test baru `payment_dialog_test.dart` (skenario gagal muat) | `_active` dibuat nullable + seluruh pemakaian dijaga; test hijau |
+| Tombol "Masuk" (CTA utama) tampak **pucat** — `ElevatedButton` memakai default Material 3 (latar terang + teks primary), bukan warna brand | Uji asap emulator (§6.5) — terlihat pada screenshot login | `elevatedButtonTheme`/`filledButtonTheme` kini eksplisit `scheme.primary` + `scheme.onPrimary`; spinner tombol saat loading diubah ke `AppColors.primary` agar tetap terlihat pada state disabled |
+
+### 6.5 Uji asap perangkat nyata (emulator Android)
+
+Perangkat: emulator **Android 17 / SDK 37** (x86_64, AVD `wasender_test`), APK **release** `app-x86_64-release.apk` (bertanda tangan release key) dipasang via `adb install`, diluncurkan seperti aplikasi biasa.
+
+| # | Langkah | Hasil | Bukti |
+|---|---------|-------|-------|
+| 1 | Luncurkan aplikasi | Splash native Android 12+ (biru brand + logo) → lanjut ke layar Masuk, **tanpa crash** | `docs/screenshots/emulator-1-splash-native.png` |
+| 2 | Layar Masuk | Logo, judul, tagline, dua field, tombol Masuk, teks bantuan — render benar di layar 1080×2400 | `docs/screenshots/emulator-2-login.png` |
+| 3 | Isi kredensial salah → tekan Masuk | Permintaan nyata ke API produksi; banner merah **"Kredensial tidak valid."** tampil rapi (pesan manusiawi, tanpa kebocoran data). Satu percobaan saja untuk menghindari rate-limit | `docs/screenshots/emulator-3-login-gagal.png` |
+| 4 | Setelah perbaikan tema tombol (§6.4) + APK dibangun ulang & dipasang ulang | Tombol "Masuk" kini **biru solid** `#2563EB` dengan teks putih — sesuai design system | `docs/screenshots/emulator-4-login-tombol-final.png` |
+
+Kesimpulan: aplikasi release **berjalan nyata di Android** — render UI, validasi input, panggilan jaringan, dan penanganan error terbukti bekerja. Login sukses, pemilihan outlet, checkout, dan cetak struk tetap **BLOCKED** (butuh kredensial staging + printer — §8.6).
 
 ## 7. Scorecard per Screen
 
-Legenda: **PASS** = terverifikasi otomatis (test/analyze/build) · **BLOCKED** = butuh perangkat/backend/kredensial · **NOT TESTED** = terkompilasi & analyze bersih, belum diuji manual (tanpa perangkat/backend).
+Legenda: **PASS** = terverifikasi otomatis (test/analyze/build) dan/atau di perangkat nyata (§6.5) · **BLOCKED** = butuh perangkat/backend/kredensial · **NOT TESTED** = terkompilasi & analyze bersih, belum diuji manual (tanpa perangkat/backend).
 
 | # | Screen/Area | Status | Basis |
 |---|-------------|--------|-------|
-| 1 | Splash | **PASS** | `widget_test.dart` |
-| 2 | Login | **PASS** | `login_test.dart` (2) |
+| 1 | Splash | **PASS** | `widget_test.dart` + emulator nyata (§6.5): splash native Android 12+ & splash Flutter |
+| 2 | Login | **PASS** | `login_test.dart` (2) + emulator nyata (§6.5): render, validasi, respons API produksi (gagal login → pesan server) |
 | 3 | Outlet gate & pemilihan outlet | NOT TESTED | Kompilasi+analyze; butuh backend untuk alur nyata |
 | 4 | Dashboard shell 5 tab | NOT TESTED | Kompilasi+analyze |
 | 5 | Beranda | NOT TESTED | Data dari `/orders/today` & `/inventory/forecast` (butuh backend) |
@@ -267,7 +282,7 @@ Adaptive icon (background warna brand + layer depan logo, `mipmap-anydpi-v26`), 
 
 | Risiko | Dampak | Mitigasi saat ini |
 |--------|--------|-------------------|
-| Belum ada uji integrasi nyata ke backend | Alur end-to-end belum terbukti | Wajib divalidasi di staging (§8.6) |
+| Integrasi end-to-end belum diuji penuh (login sukses → checkout) | Alur penuh belum terbukti | Uji asap emulator (§6.5) membuktikan jalur jaringan nyata & penanganan error; alur penuh wajib divalidasi di staging (§8.6) |
 | Bug deposit di server | Uang hantu bila diaktifkan | Klien tidak mengirim `deposit_amount` |
 | Izin refund tidak ter-seed | Refund 403 untuk non-owner | Pesan server ditampilkan; fix disarankan |
 | Shift id lokal per perangkat | Ganti perangkat/hapus data → shift "yatim" | Petunjuk tutup dari admin web pada 422 |
@@ -285,8 +300,8 @@ Adaptive icon (background warna brand + layer depan logo, `mipmap-anydpi-v26`), 
 7. Pelanggan: create, topup, pakai, refund deposit → cocokkan saldo.
 8. Printer Bluetooth: struk normal + struk dengan sisa tagihan.
 9. Laporan rentang > 93 hari ditolak; > 500 order menampilkan catatan pemotongan.
-10. Adaptive icon & splash di perangkat Android 12+ dan < 12.
+10. Adaptive icon & splash di perangkat Android 12+ dan < 12. (Android 12+ sudah terverifikasi di emulator, §6.5; API < 12 masih butuh perangkat nyata.)
 
 ### 8.7 Status akhir
 
-**READY FOR STAGING** — kode terkompilasi bersih (analyze 0 issue), 53/53 test otomatis pass, APK release terbangun (bertanda tangan release key dari `android/key.properties`; tersedia varian per-ABI), dan tidak ada fitur palsu/tombol mati (fitur tanpa dukungan API dikecualikan secara eksplisit di §5). **NOT READY untuk produksi** sampai: (a) checklist §8.6 dieksekusi dengan backend & perangkat nyata, dan (b) perbaikan backend disepakati (deposit/slug refund).
+**READY FOR STAGING** — kode terkompilasi bersih (analyze 0 issue), 53/53 test otomatis pass, APK release terbangun (bertanda tangan release key dari `android/key.properties`; tersedia varian per-ABI), uji asap emulator nyata (release APK: splash → login → jalur API produksi) lulus (§6.5), dan tidak ada fitur palsu/tombol mati (fitur tanpa dukungan API dikecualikan secara eksplisit di §5). **NOT READY untuk produksi** sampai: (a) checklist §8.6 dieksekusi dengan backend & perangkat nyata, dan (b) perbaikan backend disepakati (deposit/slug refund).
