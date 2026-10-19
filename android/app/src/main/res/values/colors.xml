@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Biru brand untuk adaptive icon + splash (lihat generate_icons.ps1). -->
+    <color name="ic_launcher_background">#0258E3</color>
+    <color name="launch_background">#0258E3</color>
+</resources>
