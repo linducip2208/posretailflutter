@@ -81,16 +81,11 @@ class OutletSelectionScreen extends StatelessWidget {
                       ),
                       subtitle: o.code != null ? Text(o.code!) : null,
                       trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                      onTap: () async {
-                        await auth.selectOutlet(o);
-                        if (context.mounted) {
-                          Navigator.of(context).pushReplacement(
-                            MaterialPageRoute(
-                              builder: (_) => const DashboardScreen(),
-                            ),
-                          );
-                        }
-                      },
+                      // Cukup pilih outlet: OutletGate mengamati AuthProvider
+                      // dan otomatis menampilkan DashboardScreen. Push manual
+                      // di sini menyebabkan dua DashboardScreen hidup
+                      // bersamaan (tree & request ganda).
+                      onTap: () => auth.selectOutlet(o),
                     ),
                   ),
                 ),

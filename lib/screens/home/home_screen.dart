@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _lastOutletId = context.read<AuthProvider>().currentOutletId;
     _online = _offline.isOnline;
     _connectivityListener = (online) {
-      if (!mounted) return;
+      if (!mounted || !context.mounted) return;
       setState(() => _online = online);
       _refreshQueueCounts();
     };
@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refreshQueueCounts() async {
     final pending = await _offline.getPendingCount();
     final failed = await _offline.getFailedCount();
-    if (!mounted) return;
+    if (!mounted || !context.mounted) return;
     setState(() {
       _pendingCount = pending;
       _failedCount = failed;

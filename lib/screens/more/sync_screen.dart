@@ -37,7 +37,7 @@ class _SyncScreenState extends State<SyncScreen> {
     super.initState();
     _online = _offline.isOnline;
     _listener = (online) {
-      if (!mounted) return;
+      if (!mounted || !context.mounted) return;
       setState(() => _online = online);
       if (online) _sync(force: false);
     };
@@ -55,7 +55,7 @@ class _SyncScreenState extends State<SyncScreen> {
     setState(() => _loading = true);
     final queue = await _offline.getPendingOrders();
     final failed = await _offline.getFailedCount();
-    if (!mounted) return;
+    if (!mounted || !context.mounted) return;
     setState(() {
       _queue = queue;
       _failedCount = failed;

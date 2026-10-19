@@ -51,7 +51,7 @@ class _MoreScreenState extends State<MoreScreen> {
 
   Future<void> _refreshPending() async {
     final count = await _offline.getPendingCount();
-    if (!mounted) return;
+    if (!mounted || !context.mounted) return;
     setState(() => _pendingCount = count);
   }
 

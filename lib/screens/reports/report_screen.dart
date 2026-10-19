@@ -49,7 +49,8 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   void _onReportChanged() {
-    if (mounted) setState(() {});
+    if (!mounted || !context.mounted) return;
+    setState(() {});
   }
 
   DateTimeRange _range() {

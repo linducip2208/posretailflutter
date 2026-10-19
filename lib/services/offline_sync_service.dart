@@ -102,8 +102,15 @@ class OfflineSyncService {
   }
 
   void _notifyListeners() {
-    for (final cb in _listeners) {
-      cb(_isOnline);
+    // Iterasi atas salinan: listener boleh melepas dirinya sendiri, dan
+    // error dari satu listener (mis. widget yang sudah di-dispose) tidak
+    // boleh menembus ke pemanggil atau memblokir listener lain.
+    for (final cb in List.of(_listeners)) {
+      try {
+        cb(_isOnline);
+      } catch (_) {
+        // Sengaja diabaikan: listener basi / tidak relevan lagi.
+      }
     }
   }
 

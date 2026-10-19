@@ -84,7 +84,10 @@ class _PosScreenState extends State<PosScreen> {
     await _offline.init();
     _isOnline = _offline.isOnline;
     _connectivityListener = (online) {
-      if (mounted) setState(() => _isOnline = online);
+      // `mounted` State masih true pada jendela unmount (elemen defunct);
+      // `context.mounted` menutup celah itu agar setState tidak melempar.
+      if (!mounted || !context.mounted) return;
+      setState(() => _isOnline = online);
       if (online) {
         _syncPending(force: false);
         _refreshQueueCounts();
@@ -416,12 +419,11 @@ class _PosScreenState extends State<PosScreen> {
   Future<void> _refreshQueueCounts() async {
     final pending = await _offline.getPendingCount();
     final failed = await _offline.getFailedCount();
-    if (mounted) {
-      setState(() {
-        _pendingSyncCount = pending;
-        _failedSyncCount = failed;
-      });
-    }
+    if (!mounted || !context.mounted) return;
+    setState(() {
+      _pendingSyncCount = pending;
+      _failedSyncCount = failed;
+    });
   }
 
   /// UUID checkout stabil: satu isi keranjang = satu client_uuid sehingga
