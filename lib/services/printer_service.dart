@@ -25,7 +25,9 @@ class PrinterService {
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
     FlutterBluePlus.scanResults.listen((results) {
       for (final result in results) {
-        if (!discoveredDevices.any((d) => d.remoteId == result.device.remoteId)) {
+        if (!discoveredDevices.any(
+          (d) => d.remoteId == result.device.remoteId,
+        )) {
           discoveredDevices.add(result.device);
         }
       }
@@ -96,6 +98,7 @@ class PrinterService {
     required double total,
     required double paid,
     required double change,
+    double remaining = 0,
     String? customerName,
     String? outletName,
   }) async {
@@ -113,16 +116,29 @@ class PrinterService {
     }
 
     // Header
-    bytes += generator.text('POS RETAIL',
-        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2));
-    bytes += generator.text(outletName ?? '',
-        styles: const PosStyles(align: PosAlign.center));
+    bytes += generator.text(
+      'POS RETAIL',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        bold: true,
+        height: PosTextSize.size2,
+        width: PosTextSize.size2,
+      ),
+    );
+    bytes += generator.text(
+      outletName ?? '',
+      styles: const PosStyles(align: PosAlign.center),
+    );
     bytes += generator.hr();
 
     // Info
     bytes += generator.row([
       PosColumn(text: 'No: $orderNumber', width: 6),
-      PosColumn(text: DateFormat('dd/MM/yy HH:mm').format(date), width: 6, styles: const PosStyles(align: PosAlign.right)),
+      PosColumn(
+        text: DateFormat('dd/MM/yy HH:mm').format(date),
+        width: 6,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
     ]);
     bytes += generator.text('Kasir: $cashier');
     if (customerName != null) {
@@ -134,17 +150,37 @@ class PrinterService {
     bytes += generator.row([
       PosColumn(text: 'Item', width: 6),
       PosColumn(text: 'Qty', width: 2),
-      PosColumn(text: 'Harga', width: 2, styles: const PosStyles(align: PosAlign.right)),
-      PosColumn(text: 'Subtotal', width: 2, styles: const PosStyles(align: PosAlign.right)),
+      PosColumn(
+        text: 'Harga',
+        width: 2,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+      PosColumn(
+        text: 'Subtotal',
+        width: 2,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
     ]);
 
     for (final item in items) {
       bytes += generator.row([
-        PosColumn(text: item['name'].toString().length > 20
-            ? item['name'].toString().substring(0, 20) : item['name'].toString(), width: 6),
+        PosColumn(
+          text: item['name'].toString().length > 20
+              ? item['name'].toString().substring(0, 20)
+              : item['name'].toString(),
+          width: 6,
+        ),
         PosColumn(text: '${item['qty']}', width: 2),
-        PosColumn(text: _formatCurrency(item['price']), width: 2, styles: const PosStyles(align: PosAlign.right)),
-        PosColumn(text: _formatCurrency(item['subtotal']), width: 2, styles: const PosStyles(align: PosAlign.right)),
+        PosColumn(
+          text: _formatCurrency(item['price']),
+          width: 2,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+        PosColumn(
+          text: _formatCurrency(item['subtotal']),
+          width: 2,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
       ]);
     }
 
@@ -153,23 +189,44 @@ class PrinterService {
     // Totals
     bytes += generator.row([
       PosColumn(text: 'Subtotal', width: 6),
-      PosColumn(text: _formatCurrency(subtotal), width: 6, styles: const PosStyles(align: PosAlign.right)),
+      PosColumn(
+        text: _formatCurrency(subtotal),
+        width: 6,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
     ]);
     if (discount > 0) {
       bytes += generator.row([
         PosColumn(text: 'Diskon', width: 6),
-        PosColumn(text: _formatCurrency(discount), width: 6, styles: const PosStyles(align: PosAlign.right)),
+        PosColumn(
+          text: _formatCurrency(discount),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
       ]);
     }
     if (tax > 0) {
       bytes += generator.row([
         PosColumn(text: 'Pajak', width: 6),
-        PosColumn(text: _formatCurrency(tax), width: 6, styles: const PosStyles(align: PosAlign.right)),
+        PosColumn(
+          text: _formatCurrency(tax),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
       ]);
     }
     bytes += generator.row([
       PosColumn(text: 'TOTAL', width: 6, styles: const PosStyles(bold: true)),
-      PosColumn(text: _formatCurrency(total), width: 6, styles: const PosStyles(align: PosAlign.right, bold: true, height: PosTextSize.size2, width: PosTextSize.size2)),
+      PosColumn(
+        text: _formatCurrency(total),
+        width: 6,
+        styles: const PosStyles(
+          align: PosAlign.right,
+          bold: true,
+          height: PosTextSize.size2,
+          width: PosTextSize.size2,
+        ),
+      ),
     ]);
 
     bytes += generator.hr();
@@ -177,18 +234,45 @@ class PrinterService {
     // Payment
     bytes += generator.row([
       PosColumn(text: 'Dibayar', width: 6),
-      PosColumn(text: _formatCurrency(paid), width: 6, styles: const PosStyles(align: PosAlign.right)),
+      PosColumn(
+        text: _formatCurrency(paid),
+        width: 6,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
     ]);
-    bytes += generator.row([
-      PosColumn(text: 'Kembalian', width: 6),
-      PosColumn(text: _formatCurrency(change), width: 6, styles: const PosStyles(align: PosAlign.right)),
-    ]);
+    if (remaining > 0) {
+      bytes += generator.row([
+        PosColumn(
+          text: 'SISA TAGIHAN',
+          width: 6,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: _formatCurrency(remaining),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right, bold: true),
+        ),
+      ]);
+    } else {
+      bytes += generator.row([
+        PosColumn(text: 'Kembalian', width: 6),
+        PosColumn(
+          text: _formatCurrency(change),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+      ]);
+    }
 
     bytes += generator.hr();
-    bytes += generator.text('Terima kasih telah berbelanja!',
-        styles: const PosStyles(align: PosAlign.center));
-    bytes += generator.text('Barang yang sudah dibeli tidak dapat ditukar',
-        styles: const PosStyles(align: PosAlign.center));
+    bytes += generator.text(
+      'Terima kasih telah berbelanja!',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.text(
+      'Barang yang sudah dibeli tidak dapat ditukar',
+      styles: const PosStyles(align: PosAlign.center),
+    );
     bytes += generator.feed(3);
     bytes += generator.cut();
 
@@ -196,7 +280,11 @@ class PrinterService {
   }
 
   String _formatCurrency(double amount) {
-    final format = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
+    final format = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp',
+      decimalDigits: 0,
+    );
     return format.format(amount);
   }
 
@@ -211,11 +299,16 @@ class PrinterService {
     required double total,
     required double paid,
     required double change,
+    double remaining = 0,
     String? customerName,
     String? outletName,
   }) async {
     final pdf = pw.Document();
-    final format = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
+    final format = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp',
+      decimalDigits: 0,
+    );
 
     final logoBytes = await _loadLogoBytes();
     final logoImage = logoBytes != null ? pw.MemoryImage(logoBytes) : null;
@@ -231,40 +324,132 @@ class PrinterService {
                 pw.Center(child: pw.Image(logoImage, width: 60, height: 60)),
                 pw.SizedBox(height: 4),
               ],
-              pw.Center(child: pw.Text('POS RETAIL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold))),
+              pw.Center(
+                child: pw.Text(
+                  'POS RETAIL',
+                  style: pw.TextStyle(
+                    fontSize: 10,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
               if (outletName != null)
-                pw.Center(child: pw.Text(outletName, style: const pw.TextStyle(fontSize: 8))),
+                pw.Center(
+                  child: pw.Text(
+                    outletName,
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ),
               pw.Divider(),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('No: $orderNumber', style: const pw.TextStyle(fontSize: 7)),
-                  pw.Text(DateFormat('dd/MM/yy HH:mm').format(date), style: const pw.TextStyle(fontSize: 7)),
+                  pw.Text(
+                    'No: $orderNumber',
+                    style: const pw.TextStyle(fontSize: 7),
+                  ),
+                  pw.Text(
+                    DateFormat('dd/MM/yy HH:mm').format(date),
+                    style: const pw.TextStyle(fontSize: 7),
+                  ),
                 ],
               ),
-              pw.Text('Kasir: $cashier', style: const pw.TextStyle(fontSize: 7)),
+              pw.Text(
+                'Kasir: $cashier',
+                style: const pw.TextStyle(fontSize: 7),
+              ),
               if (customerName != null)
-                pw.Text('Customer: $customerName', style: const pw.TextStyle(fontSize: 7)),
+                pw.Text(
+                  'Customer: $customerName',
+                  style: const pw.TextStyle(fontSize: 7),
+                ),
               pw.Divider(),
               pw.Row(
                 children: [
-                  pw.Expanded(flex: 5, child: pw.Text('Item', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 2, child: pw.Text('Qty', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 3, child: pw.Text('Harga', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right)),
-                  pw.Expanded(flex: 3, child: pw.Text('Subtotal', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right)),
+                  pw.Expanded(
+                    flex: 5,
+                    child: pw.Text(
+                      'Item',
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    flex: 2,
+                    child: pw.Text(
+                      'Qty',
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    flex: 3,
+                    child: pw.Text(
+                      'Harga',
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                      textAlign: pw.TextAlign.right,
+                    ),
+                  ),
+                  pw.Expanded(
+                    flex: 3,
+                    child: pw.Text(
+                      'Subtotal',
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                      textAlign: pw.TextAlign.right,
+                    ),
+                  ),
                 ],
               ),
               ...items.map((item) {
                 final rawName = item['name']?.toString() ?? 'Item';
-                final name = rawName.length > 18 ? rawName.substring(0, 18) : rawName;
-                double toNum(dynamic v) =>
-                    v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0;
+                final name = rawName.length > 18
+                    ? rawName.substring(0, 18)
+                    : rawName;
+                double toNum(dynamic v) => v is num
+                    ? v.toDouble()
+                    : double.tryParse(v?.toString() ?? '') ?? 0;
                 return pw.Row(
                   children: [
-                    pw.Expanded(flex: 5, child: pw.Text(name, style: const pw.TextStyle(fontSize: 7))),
-                    pw.Expanded(flex: 2, child: pw.Text('${item['qty'] ?? 0}', style: const pw.TextStyle(fontSize: 7))),
-                    pw.Expanded(flex: 3, child: pw.Text(format.format(toNum(item['price'])), style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right)),
-                    pw.Expanded(flex: 3, child: pw.Text(format.format(toNum(item['subtotal'])), style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right)),
+                    pw.Expanded(
+                      flex: 5,
+                      child: pw.Text(
+                        name,
+                        style: const pw.TextStyle(fontSize: 7),
+                      ),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text(
+                        '${item['qty'] ?? 0}',
+                        style: const pw.TextStyle(fontSize: 7),
+                      ),
+                    ),
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Text(
+                        format.format(toNum(item['price'])),
+                        style: const pw.TextStyle(fontSize: 7),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Text(
+                        format.format(toNum(item['subtotal'])),
+                        style: const pw.TextStyle(fontSize: 7),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
                   ],
                 );
               }),
@@ -273,7 +458,10 @@ class PrinterService {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('Subtotal', style: const pw.TextStyle(fontSize: 7)),
-                  pw.Text(format.format(subtotal), style: const pw.TextStyle(fontSize: 7)),
+                  pw.Text(
+                    format.format(subtotal),
+                    style: const pw.TextStyle(fontSize: 7),
+                  ),
                 ],
               ),
               if (discount > 0)
@@ -281,7 +469,10 @@ class PrinterService {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text('Diskon', style: const pw.TextStyle(fontSize: 7)),
-                    pw.Text(format.format(discount), style: const pw.TextStyle(fontSize: 7)),
+                    pw.Text(
+                      format.format(discount),
+                      style: const pw.TextStyle(fontSize: 7),
+                    ),
                   ],
                 ),
               if (tax > 0)
@@ -289,14 +480,29 @@ class PrinterService {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text('Pajak', style: const pw.TextStyle(fontSize: 7)),
-                    pw.Text(format.format(tax), style: const pw.TextStyle(fontSize: 7)),
+                    pw.Text(
+                      format.format(tax),
+                      style: const pw.TextStyle(fontSize: 7),
+                    ),
                   ],
                 ),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('TOTAL', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                  pw.Text(format.format(total), style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(
+                    'TOTAL',
+                    style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.Text(
+                    format.format(total),
+                    style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
               pw.Divider(),
@@ -304,19 +510,59 @@ class PrinterService {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('Dibayar', style: const pw.TextStyle(fontSize: 7)),
-                  pw.Text(format.format(paid), style: const pw.TextStyle(fontSize: 7)),
+                  pw.Text(
+                    format.format(paid),
+                    style: const pw.TextStyle(fontSize: 7),
+                  ),
                 ],
               ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Kembalian', style: const pw.TextStyle(fontSize: 7)),
-                  pw.Text(format.format(change), style: const pw.TextStyle(fontSize: 7)),
-                ],
-              ),
+              if (remaining > 0)
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'SISA TAGIHAN',
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.Text(
+                      format.format(remaining),
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'Kembalian',
+                      style: const pw.TextStyle(fontSize: 7),
+                    ),
+                    pw.Text(
+                      format.format(change),
+                      style: const pw.TextStyle(fontSize: 7),
+                    ),
+                  ],
+                ),
               pw.Divider(),
-              pw.Center(child: pw.Text('Terima kasih telah berbelanja!', style: const pw.TextStyle(fontSize: 7))),
-              pw.Center(child: pw.Text('Barang yang sudah dibeli tidak dapat ditukar', style: const pw.TextStyle(fontSize: 6))),
+              pw.Center(
+                child: pw.Text(
+                  'Terima kasih telah berbelanja!',
+                  style: const pw.TextStyle(fontSize: 7),
+                ),
+              ),
+              pw.Center(
+                child: pw.Text(
+                  'Barang yang sudah dibeli tidak dapat ditukar',
+                  style: const pw.TextStyle(fontSize: 6),
+                ),
+              ),
             ],
           );
         },
@@ -326,17 +572,17 @@ class PrinterService {
     return pdf.save();
   }
 
-  Future<void> shareReceiptPdf(Uint8List pdfBytes, {String? orderNumber}) async {
+  Future<void> shareReceiptPdf(
+    Uint8List pdfBytes, {
+    String? orderNumber,
+  }) async {
     final dir = await getTemporaryDirectory();
     final filename = 'struk-${orderNumber ?? 'order'}.pdf';
     final file = File('${dir.path}/$filename');
     await file.writeAsBytes(pdfBytes);
 
     await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path)],
-        text: 'Struk $orderNumber',
-      ),
+      ShareParams(files: [XFile(file.path)], text: 'Struk $orderNumber'),
     );
   }
 
@@ -347,10 +593,7 @@ class PrinterService {
     await file.writeAsBytes(pdfBytes);
 
     await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path)],
-        subject: 'Struk $orderNumber',
-      ),
+      ShareParams(files: [XFile(file.path)], subject: 'Struk $orderNumber'),
     );
   }
 }

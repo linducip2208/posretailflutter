@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../l10n/s.dart';
 import '../../providers/auth_provider.dart';
+import '../../theme/app_theme.dart';
 import '../outlet/outlet_selection_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -15,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
+  String? _localError;
 
   @override
   void dispose() {
@@ -24,23 +27,25 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
+    final email = _emailCtrl.text.trim();
+    final password = _passCtrl.text;
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        _localError = email.isEmpty
+            ? S.tn(context, 'Email wajib diisi.')
+            : S.tn(context, 'Password wajib diisi.');
+      });
+      return;
+    }
+    setState(() => _localError = null);
+
     final auth = context.read<AuthProvider>();
-    final ok = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
-    if (ok && mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const OutletGate()),
-      );
-    } else if (mounted && auth.error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(auth.error!),
-          backgroundColor: Colors.red.shade700,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+    final ok = await auth.login(email, password);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const OutletGate()));
     }
   }
 
@@ -48,89 +53,138 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final theme = Theme.of(context);
+    final error = _localError ?? auth.error;
 
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(AppSpacing.xl),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 400),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.store, size: 72, color: theme.colorScheme.primary),
-                  const SizedBox(height: 16),
-                  Text(S.t(context, 'POS Retail'), style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 8),
-                  Text(S.t(context, 'Sistem Kasir Modern'), style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-                  const SizedBox(height: 40),
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Image.asset(
+                      'assets/app_icon.png',
+                      width: 56,
+                      height: 56,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  Text(
+                    S.t(context, 'POS Retail'),
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontSize: 24,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    S.t(context, 'Masuk untuk mulai bertransaksi'),
+                    style: theme.textTheme.bodySmall?.copyWith(fontSize: 13),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
 
                   TextField(
                     controller: _emailCtrl,
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    autocorrect: false,
                     decoration: InputDecoration(
                       labelText: S.t(context, 'Email'),
                       prefixIcon: const Icon(Icons.email_outlined),
-                      border: const OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpacing.md),
                   TextField(
                     controller: _passCtrl,
                     obscureText: _obscure,
                     decoration: InputDecoration(
                       labelText: S.t(context, 'Password'),
                       prefixIcon: const Icon(Icons.lock_outlined),
-                      border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
-                        icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                        tooltip: S.t(context, 'Tampilkan/sembunyikan password'),
+                        icon: Icon(
+                          _obscure ? Icons.visibility_off : Icons.visibility,
+                        ),
                         onPressed: () => setState(() => _obscure = !_obscure),
                       ),
                     ),
                     onSubmitted: (_) => _login(),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: AppSpacing.lg),
 
                   SizedBox(
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
                       onPressed: auth.isLoading ? null : _login,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
                       child: auth.isLoading
-                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : Text(S.t(context, 'Masuk'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.4,
+                              ),
+                            )
+                          : Text(
+                              S.t(context, 'Masuk'),
+                              style: const TextStyle(fontSize: 16),
+                            ),
                     ),
                   ),
-                  if (auth.error != null) ...[
-                    const SizedBox(height: 16),
+                  if (error != null) ...[
+                    const SizedBox(height: AppSpacing.lg),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(AppSpacing.md),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.red.shade200),
+                        color: AppColors.errorSoft,
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        border: Border.all(
+                          color: AppColors.error.withValues(alpha: 0.35),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
-                          const SizedBox(width: 10),
+                          const Icon(
+                            Icons.error_outline,
+                            color: AppColors.error,
+                            size: 20,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
                           Expanded(
                             child: Text(
-                              auth.error!,
-                              style: TextStyle(color: Colors.red.shade800, fontSize: 14, fontWeight: FontWeight.w500),
+                              error,
+                              style: const TextStyle(
+                                color: Color(0xFF991B1B),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
                   ],
+                  const SizedBox(height: AppSpacing.xl),
+                  Text(
+                    S.t(
+                      context,
+                      'Hubungi admin bila akun atau password Anda bermasalah.',
+                    ),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                  ),
                 ],
               ),
             ),

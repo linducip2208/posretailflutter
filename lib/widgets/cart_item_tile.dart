@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import '../../l10n/s.dart';
-import '../../providers/cart_provider.dart';
 
+import '../l10n/s.dart';
+import '../providers/cart_provider.dart';
+import '../theme/app_theme.dart';
+import '../utils/formatters.dart';
+import 'common/quantity_stepper.dart';
+
+/// Baris item keranjang: nama (+varian), harga, kuantitas, diskon per item.
 class CartItemTile extends StatefulWidget {
   final CartItem item;
   final int index;
@@ -30,16 +34,17 @@ class _CartItemTileState extends State<CartItemTile> {
   @override
   void initState() {
     super.initState();
-    _discountCtrl =
-        TextEditingController(text: '${widget.item.discountPercent}');
+    _discountCtrl = TextEditingController(
+      text: _formatPercent(widget.item.discountPercent),
+    );
   }
 
   @override
   void didUpdateWidget(covariant CartItemTile oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.discountPercent != widget.item.discountPercent &&
-        _discountCtrl.text != '${widget.item.discountPercent}') {
-      _discountCtrl.text = '${widget.item.discountPercent}';
+        _discountCtrl.text != _formatPercent(widget.item.discountPercent)) {
+      _discountCtrl.text = _formatPercent(widget.item.discountPercent);
     }
   }
 
@@ -49,114 +54,152 @@ class _CartItemTileState extends State<CartItemTile> {
     super.dispose();
   }
 
+  String _formatPercent(double value) =>
+      value == value.roundToDouble() ? '${value.toInt()}' : '$value';
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final format = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
-    final hasDiscount = widget.item.discountPercent > 0;
+    final item = widget.item;
+    final hasDiscount = item.discountPercent > 0;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 2),
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.xs,
+          AppSpacing.sm,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(
-                    widget.item.product.name,
-                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.product.name,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (item.variant != null)
+                        Text(
+                          '${S.t(context, 'Varian')}: ${item.variant!.name}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 11,
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                GestureDetector(
-                  onTap: widget.onRemove,
-                  child: Icon(Icons.close, size: 16, color: Colors.red.shade300),
+                IconButton(
+                  onPressed: widget.onRemove,
+                  tooltip: S.t(context, 'Hapus item'),
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  visualDensity: VisualDensity.compact,
+                  color: AppColors.error,
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(format.format(widget.item.unitPrice), style: theme.textTheme.bodySmall),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    InkWell(
-                      onTap: () => widget.onQuantityChanged(widget.index, widget.item.quantity - 1),
-                      child: Container(
-                        width: 28, height: 28,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: theme.dividerColor),
-                          borderRadius: BorderRadius.circular(6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${Fmt.rupiah(item.unitPrice)} × ${item.quantity}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 11.5,
                         ),
-                        child: const Icon(Icons.remove, size: 16),
                       ),
-                    ),
-                    Container(
-                      width: 32,
-                      alignment: Alignment.center,
-                      child: Text('${widget.item.quantity}', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700)),
-                    ),
-                    InkWell(
-                      onTap: () => widget.onQuantityChanged(widget.index, widget.item.quantity + 1),
-                      child: Container(
-                        width: 28, height: 28,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: theme.dividerColor),
-                          borderRadius: BorderRadius.circular(6),
+                      Text(
+                        Fmt.rupiah(item.subtotal),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: theme.colorScheme.primary,
                         ),
-                        child: const Icon(Icons.add, size: 16),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () => setState(() => _showDiscount = !_showDiscount),
-                      child: Container(
-                        width: 28, height: 28,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: hasDiscount ? Colors.red.shade300 : theme.dividerColor),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Icon(Icons.percent, size: 14, color: hasDiscount ? Colors.red.shade400 : Colors.grey),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () =>
+                      setState(() => _showDiscount = !_showDiscount),
+                  tooltip: S.t(context, 'Diskon item'),
+                  icon: Icon(
+                    Icons.percent,
+                    size: 16,
+                    color: hasDiscount ? AppColors.error : null,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+                QuantityStepper(
+                  value: item.quantity,
+                  min: 0,
+                  max: CartProvider.maxQuantity,
+                  compact: true,
+                  onChanged: (qty) =>
+                      widget.onQuantityChanged(widget.index, qty),
                 ),
               ],
             ),
             if (_showDiscount) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: AppSpacing.sm),
               Row(
                 children: [
-                  Text('${S.t(context, 'Diskon')}:', style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
-                  const SizedBox(width: 6),
+                  Text(
+                    '${S.t(context, 'Diskon')} (%)',
+                    style: theme.textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
                   SizedBox(
-                    width: 60,
-                    height: 28,
+                    width: 72,
+                    height: 34,
                     child: TextField(
                       decoration: const InputDecoration(
-                        contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: 0,
+                        ),
                         suffixText: '%',
                         isDense: true,
                       ),
                       keyboardType: TextInputType.number,
-                      style: const TextStyle(fontSize: 11),
+                      style: const TextStyle(fontSize: 12),
                       controller: _discountCtrl,
                       onChanged: (v) {
-                        final pct = double.tryParse(v) ?? 0;
+                        final pct = (double.tryParse(v) ?? 0)
+                            .clamp(0, 100)
+                            .toDouble();
                         widget.onDiscountChanged(widget.index, pct);
                       },
                     ),
                   ),
                   const Spacer(),
-                  Text(format.format(widget.item.subtotal),
-                      style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: theme.colorScheme.primary)),
+                  if (hasDiscount)
+                    Text(
+                      '-${Fmt.rupiah(item.discountAmount)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.error,
+                      ),
+                    ),
                 ],
               ),
             ],

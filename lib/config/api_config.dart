@@ -1,6 +1,6 @@
 class ApiConfig {
   static const String baseUrl = 'https://posretail.whitelabel.co.id/api/v1';
 
-  static const Duration connectTimeout = Duration(seconds: 15);
-  static const Duration receiveTimeout = Duration(seconds: 15);
+  /// Batas tunggu total per request HTTP (connect + baca respons).
+  static const Duration requestTimeout = Duration(seconds: 15);
 }

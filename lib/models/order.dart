@@ -21,7 +21,9 @@ class OrderItem {
     return OrderItem(
       id: safeInt(json['id']),
       productId: safeInt(json['product_id']),
-      productName: json['product'] is Map ? safeString(json['product']['name']) : '',
+      productName: json['product'] is Map
+          ? safeString(json['product']['name'])
+          : '',
       quantity: safeInt(json['quantity']),
       unitPrice: safeDouble(json['unit_price']),
       subtotal: safeDouble(json['subtotal']),
@@ -36,6 +38,7 @@ class Order {
   final String? customerName;
   final int outletId;
   final String? outletName;
+  final String? cashierName;
   final String? queueNumber;
   final double subtotal;
   final double discountAmount;
@@ -54,6 +57,7 @@ class Order {
     this.customerName,
     required this.outletId,
     this.outletName,
+    this.cashierName,
     this.queueNumber,
     required this.subtotal,
     required this.discountAmount,
@@ -70,12 +74,23 @@ class Order {
     return Order(
       id: safeInt(json['id']),
       orderNumber: safeString(json['order_number']),
-      customerId: json['customer_id'] == null ? null : safeInt(json['customer_id']),
-      customerName: json['customer_name']?.toString() ??
-          (json['customer'] is Map ? safeString(json['customer']['name'], '') : null),
+      customerId: json['customer_id'] == null
+          ? null
+          : safeInt(json['customer_id']),
+      customerName:
+          json['customer_name']?.toString() ??
+          (json['customer'] is Map
+              ? safeString(json['customer']['name'], '')
+              : null),
       outletId: safeInt(json['outlet_id']),
-      outletName: json['outlet_name']?.toString() ??
-          (json['outlet'] is Map ? safeString(json['outlet']['name'], '') : null),
+      outletName:
+          json['outlet_name']?.toString() ??
+          (json['outlet'] is Map
+              ? safeString(json['outlet']['name'], '')
+              : null),
+      cashierName:
+          json['cashier_name']?.toString() ??
+          (json['user'] is Map ? safeString(json['user']['name'], '') : null),
       queueNumber: json['queue_number']?.toString(),
       subtotal: safeDouble(json['subtotal']),
       discountAmount: safeDouble(json['discount_amount']),
@@ -86,15 +101,15 @@ class Order {
       createdAt: safeString(json['created_at']),
       items: json['items'] is List
           ? (json['items'] as List)
-              .whereType<Map<String, dynamic>>()
-              .map(OrderItem.fromJson)
-              .toList()
+                .whereType<Map<String, dynamic>>()
+                .map(OrderItem.fromJson)
+                .toList()
           : null,
       payments: json['payments'] is List
           ? (json['payments'] as List)
-              .whereType<Map<String, dynamic>>()
-              .map(Payment.fromJson)
-              .toList()
+                .whereType<Map<String, dynamic>>()
+                .map(Payment.fromJson)
+                .toList()
           : null,
     );
   }

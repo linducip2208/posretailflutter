@@ -30,7 +30,7 @@ void main() {
             'quantity': 2,
             'unit_price': '5000.00',
             'subtotal': '10000.00',
-          }
+          },
         ],
         'payments': [
           {
@@ -39,7 +39,7 @@ void main() {
             'payment_method': {'name': 'Tunai'},
             'amount': '11100.00',
             'status': 'success',
-          }
+          },
         ],
       });
       expect(o.totalAmount, 11100);
@@ -52,7 +52,7 @@ void main() {
         'id': 'x',
         'items': 'bukan-list',
         'payments': [
-          {'id': 1}
+          {'id': 1},
         ],
         'product': 'string',
       });
@@ -70,7 +70,7 @@ void main() {
         'current_stock': 10,
         'category': {'name': 'Fashion'},
         'variants': [
-          {'id': 1}
+          {'id': 1},
         ],
       });
       expect(p.hasVariants, isTrue);
@@ -85,7 +85,7 @@ void main() {
         'role': 'kasir',
         'outlets': [
           {'id': 1, 'name': 'Pusat', 'code': 'P1'},
-          {'id': 2, 'name': 'Cabang'}
+          {'id': 2, 'name': 'Cabang'},
         ],
       });
       expect(u.outlets.length, 2);

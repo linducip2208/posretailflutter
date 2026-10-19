@@ -3,7 +3,12 @@ import 'package:pos_retail/models/product.dart';
 import 'package:pos_retail/providers/cart_provider.dart';
 
 Product _p({required int id, required double price, int stock = 100}) {
-  return Product(id: id, name: 'P$id', sellingPrice: price, currentStock: stock);
+  return Product(
+    id: id,
+    name: 'P$id',
+    sellingPrice: price,
+    currentStock: stock,
+  );
 }
 
 void main() {

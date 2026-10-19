@@ -25,9 +25,9 @@ class User {
       role: json['role']?.toString(),
       outlets: rawOutlets is List
           ? rawOutlets
-              .whereType<Map<String, dynamic>>()
-              .map(Outlet.fromJson)
-              .toList()
+                .whereType<Map<String, dynamic>>()
+                .map(Outlet.fromJson)
+                .toList()
           : const [],
     );
   }

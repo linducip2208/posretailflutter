@@ -18,8 +18,7 @@ const Map<String, String> stringsEn = {
   // Outlet
   'Pilih Outlet': 'Select Outlet',
   'Pilih outlet': 'Select outlet',
-  'Pilih outlet dulu sebelum transaksi':
-      'Select an outlet before transacting',
+  'Pilih outlet dulu sebelum transaksi': 'Select an outlet before transacting',
   'Halo, ': 'Hello, ',
   '! Pilih outlet aktif untuk berjualan.':
       '! Select the active outlet to sell.',
@@ -60,8 +59,7 @@ const Map<String, String> stringsEn = {
   'Pesanan {no} berhasil!{antri}': 'Order {no} successful!{antri}',
   'Pesanan tersimpan di perangkat ({n} menunggu kirim). Bukan bukti lunas server.':
       'Order saved on device ({n} pending upload). Not yet confirmed by server.',
-  '{n} transaksi offline berhasil dikirim':
-      '{n} offline transactions uploaded',
+  '{n} transaksi offline berhasil dikirim': '{n} offline transactions uploaded',
   // Pembayaran
   'Pembayaran': 'Payment',
   'Total Dibayar:': 'Total Paid:',

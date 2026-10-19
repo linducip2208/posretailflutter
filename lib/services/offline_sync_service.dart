@@ -25,9 +25,15 @@ class OfflineSyncService {
 
   static const int _maxAttempts = 10;
 
-  Future<void> init() async {
-    final dbPath = await getDatabasesPath();
-    _db = await openDatabase(p.join(dbPath, 'pos_offline.db'),
+  /// [databasePath] hanya diisi di test (mis. inMemoryDatabasePath) supaya
+  /// database terisolasi dari data aplikasi.
+  Future<void> init({String? databasePath}) async {
+    final dbPath =
+        databasePath ??
+        p.join(await databaseFactory.getDatabasesPath(), 'pos_offline.db');
+    _db = await databaseFactory.openDatabase(
+      dbPath,
+      options: OpenDatabaseOptions(
         version: 4,
         onCreate: (db, version) async {
           await db.execute('''
@@ -51,9 +57,11 @@ class OfflineSyncService {
         )
       ''');
           await db.execute(
-              'CREATE INDEX IF NOT EXISTS idx_pv_outlet_barcode ON product_variants(outlet_id, barcode)');
+            'CREATE INDEX IF NOT EXISTS idx_pv_outlet_barcode ON product_variants(outlet_id, barcode)',
+          );
           await db.execute(
-              'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)');
+            'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)',
+          );
           await _createOrdersTable(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
@@ -66,18 +74,26 @@ class OfflineSyncService {
           if (oldVersion < 4) {
             await _upgradeOrdersV4(db);
           }
-        });
+        },
+      ),
+    );
 
-    final connectivity = Connectivity();
-    _isOnline = await _checkConnectivity();
-    connectivity.onConnectivityChanged.listen((results) async {
-      final wasOffline = !_isOnline;
+    try {
+      final connectivity = Connectivity();
       _isOnline = await _checkConnectivity();
-      _notifyListeners();
-      if (wasOffline && _isOnline) {
-        await syncPendingOrders();
-      }
-    });
+      connectivity.onConnectivityChanged.listen((results) async {
+        final wasOffline = !_isOnline;
+        _isOnline = await _checkConnectivity();
+        _notifyListeners();
+        if (wasOffline && _isOnline) {
+          await syncPendingOrders();
+        }
+      }, onError: (_) {});
+    } catch (_) {
+      // Plugin connectivity tidak tersedia (unit test / platform tanpa plugin):
+      // asumsikan online — fallback offline tetap bekerja via ApiNetworkException.
+      _isOnline = true;
+    }
   }
 
   Future<bool> _checkConnectivity() async {
@@ -93,8 +109,7 @@ class OfflineSyncService {
 
   double _num(dynamic v) =>
       v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0;
-  int _int(dynamic v) =>
-      v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
+  int _int(dynamic v) => v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
 
   Future<void> _upgradeProductsV3(Database db) async {
     // v3: cache outlet-aware + tabel varian. Tanpa DELETE massal.
@@ -117,58 +132,54 @@ class OfflineSyncService {
       )
     ''');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_pv_outlet_barcode ON product_variants(outlet_id, barcode)');
+      'CREATE INDEX IF NOT EXISTS idx_pv_outlet_barcode ON product_variants(outlet_id, barcode)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)');
+      'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)',
+    );
   }
 
   // Cache produk: UPSERT per baris (replace), TANPA delete massal.
   // Hasil search tidak boleh menghapus katalog yang sudah tersimpan,
   // dan cache tidak boleh tercampur antar outlet.
-  Future<void> cacheProducts(List<Map<String, dynamic>> products,
-      {required int outletId}) async {
+  Future<void> cacheProducts(
+    List<Map<String, dynamic>> products, {
+    required int outletId,
+  }) async {
     if (_db == null) return;
     final now = DateTime.now().toIso8601String();
     final batch = _db!.batch();
     for (final p in products) {
       final pid = _int(p['id']);
-      batch.insert(
-        'products',
-        {
-          'id': pid,
-          'outlet_id': outletId,
-          'name': p['name']?.toString(),
-          'sku': p['sku']?.toString(),
-          'barcode': p['barcode']?.toString(),
-          'selling_price': _num(p['selling_price']),
-          'current_stock': _int(p['current_stock']),
-          'image': p['image']?.toString(),
-          'category_name': p['category'] is Map
-              ? p['category']['name']?.toString()
-              : p['category_name']?.toString(),
-          'updated_at': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      batch.insert('products', {
+        'id': pid,
+        'outlet_id': outletId,
+        'name': p['name']?.toString(),
+        'sku': p['sku']?.toString(),
+        'barcode': p['barcode']?.toString(),
+        'selling_price': _num(p['selling_price']),
+        'current_stock': _int(p['current_stock']),
+        'image': p['image']?.toString(),
+        'category_name': p['category'] is Map
+            ? p['category']['name']?.toString()
+            : p['category_name']?.toString(),
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       final variants = p['variants'];
       if (variants is List) {
         for (final v in variants) {
           if (v is! Map<String, dynamic>) continue;
-          batch.insert(
-            'product_variants',
-            {
-              'id': _int(v['id']),
-              'product_id': pid,
-              'outlet_id': outletId,
-              'name': v['name']?.toString(),
-              'sku': v['sku']?.toString(),
-              'barcode': v['barcode']?.toString(),
-              'selling_price': _num(v['selling_price'] ?? p['selling_price']),
-              'current_stock': _int(v['current_stock'] ?? 0),
-              'updated_at': now,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+          batch.insert('product_variants', {
+            'id': _int(v['id']),
+            'product_id': pid,
+            'outlet_id': outletId,
+            'name': v['name']?.toString(),
+            'sku': v['sku']?.toString(),
+            'barcode': v['barcode']?.toString(),
+            'selling_price': _num(v['selling_price'] ?? p['selling_price']),
+            'current_stock': _int(v['current_stock'] ?? 0),
+            'updated_at': now,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
     }
@@ -176,35 +187,53 @@ class OfflineSyncService {
   }
 
   // Search products from local cache (selalu dibatasi outlet aktif).
-  Future<List<Map<String, dynamic>>> searchProducts(String? query,
-      {required int outletId}) async {
+  Future<List<Map<String, dynamic>>> searchProducts(
+    String? query, {
+    required int outletId,
+  }) async {
     if (_db == null) return [];
     if (query == null || query.isEmpty) {
-      return _db!.query('products',
-          where: 'outlet_id = ?', whereArgs: [outletId], limit: 50);
+      return _db!.query(
+        'products',
+        where: 'outlet_id = ?',
+        whereArgs: [outletId],
+        limit: 50,
+      );
     }
-    return _db!.query('products',
-        where: 'outlet_id = ? AND (name LIKE ? OR sku LIKE ? OR barcode = ?)',
-        whereArgs: [outletId, '%$query%', '%$query%', query],
-        limit: 50);
+    return _db!.query(
+      'products',
+      where: 'outlet_id = ? AND (name LIKE ? OR sku LIKE ? OR barcode = ?)',
+      whereArgs: [outletId, '%$query%', '%$query%', query],
+      limit: 50,
+    );
   }
 
-  Future<Map<String, dynamic>?> getProductByBarcode(String barcode,
-      {required int outletId}) async {
+  Future<Map<String, dynamic>?> getProductByBarcode(
+    String barcode, {
+    required int outletId,
+  }) async {
     if (_db == null || barcode.isEmpty) return null;
-    final results = await _db!.query('products',
-        where: 'outlet_id = ? AND barcode = ?',
-        whereArgs: [outletId, barcode],
-        limit: 1);
+    final results = await _db!.query(
+      'products',
+      where: 'outlet_id = ? AND barcode = ?',
+      whereArgs: [outletId, barcode],
+      limit: 1,
+    );
     if (results.isNotEmpty) return results.first;
     // Fallback: barcode milik varian.
-    final v = await _db!.query('product_variants',
-        where: 'outlet_id = ? AND barcode = ?',
-        whereArgs: [outletId, barcode],
-        limit: 1);
+    final v = await _db!.query(
+      'product_variants',
+      where: 'outlet_id = ? AND barcode = ?',
+      whereArgs: [outletId, barcode],
+      limit: 1,
+    );
     if (v.isEmpty) return null;
-    final parent = await _db!.query('products',
-        where: 'id = ?', whereArgs: [v.first['product_id']], limit: 1);
+    final parent = await _db!.query(
+      'products',
+      where: 'id = ?',
+      whereArgs: [v.first['product_id']],
+      limit: 1,
+    );
     if (parent.isEmpty) return null;
     return {...parent.first, ...v.first, 'id': parent.first['id']};
   }
@@ -212,7 +241,8 @@ class OfflineSyncService {
   Future<void> _createOrdersTable(Database db) async {
     // Idempotent: aman dipanggil dari onCreate maupun onUpgrade.
     final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_orders'");
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_orders'",
+    );
     if (tables.isEmpty) {
       await db.execute('''
         CREATE TABLE offline_orders (
@@ -231,22 +261,29 @@ class OfflineSyncService {
     final cols = await db.rawQuery('PRAGMA table_info(offline_orders)');
     final names = cols.map((c) => c['name'] as String).toSet();
     if (!names.contains('client_uuid')) {
-      await db.execute('ALTER TABLE offline_orders ADD COLUMN client_uuid TEXT');
+      await db.execute(
+        'ALTER TABLE offline_orders ADD COLUMN client_uuid TEXT',
+      );
     }
     if (!names.contains('attempts')) {
-      await db.execute('ALTER TABLE offline_orders ADD COLUMN attempts INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE offline_orders ADD COLUMN attempts INTEGER DEFAULT 0',
+      );
     }
     if (!names.contains('last_error')) {
       await db.execute('ALTER TABLE offline_orders ADD COLUMN last_error TEXT');
     }
     if (!names.contains('last_attempt_at')) {
-      await db.execute('ALTER TABLE offline_orders ADD COLUMN last_attempt_at TEXT');
+      await db.execute(
+        'ALTER TABLE offline_orders ADD COLUMN last_attempt_at TEXT',
+      );
     }
   }
 
   Future<void> _upgradeOrdersV4(Database db) async {
     final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_orders'");
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_orders'",
+    );
     if (tables.isEmpty) {
       await _createOrdersTable(db);
       return;
@@ -254,7 +291,9 @@ class OfflineSyncService {
     final cols = await db.rawQuery('PRAGMA table_info(offline_orders)');
     final names = cols.map((c) => c['name'] as String).toSet();
     if (!names.contains('last_attempt_at')) {
-      await db.execute('ALTER TABLE offline_orders ADD COLUMN last_attempt_at TEXT');
+      await db.execute(
+        'ALTER TABLE offline_orders ADD COLUMN last_attempt_at TEXT',
+      );
     }
   }
 
@@ -278,17 +317,44 @@ class OfflineSyncService {
     return _backoffSecs[i < _backoffSecs.length ? i : _backoffSecs.length - 1];
   }
 
+  // Batas maksimum order per request sync-batch (kontrak backend: max 50).
+  static const int maxBatchSize = 50;
+
   // Sync pending orders via /orders/sync-batch (idempoten via client_uuid).
-  // Hanya ditandai synced=1 jika server status created/duplicate.
-  // Gagal = attempts+1 + last_error + backoff; lewat batas → berhenti retry
-  // otomatis (tetap tampil di badge agar kasir tahu), tanpa loop infinite.
-  // [force=true] untuk aksi manual kasir (abaikan jendela backoff).
+  // - Dikirim per batch maksimal [maxBatchSize], di-loop sampai antrean
+  //   habis atau tidak ada progres (mendukung >50 order tertunda).
+  // - Hanya ditandai synced=1 jika server status created/duplicate.
+  // - Batch ditolak server (mis. 422) → attempts+1 + last_error + backoff,
+  //   tanpa retry tanpa henti. Jaringan mati → tanpa penalti attempts.
+  // - [force=true] untuk aksi manual kasir (abaikan jendela backoff).
   Future<int> syncPendingOrders({bool force = false}) async {
     if (_db == null || !_isOnline) return 0;
 
-    var pending = await _db!.query('offline_orders',
-        where: 'synced = 0 AND attempts < $_maxAttempts', orderBy: 'id ASC');
-    if (pending.isEmpty) return 0;
+    var totalSynced = 0;
+    for (var round = 0; round < 10; round++) {
+      final batch = await _nextPendingBatch(force: force);
+      if (batch.isEmpty) break;
+
+      final sent = await _sendBatch(batch);
+      totalSynced += sent;
+
+      if (batch.length < maxBatchSize) break; // antrean sudah habis
+      if (sent == 0) break; // tidak ada progres — sisanya tunggu backoff
+    }
+    return totalSynced;
+  }
+
+  /// Ambil batch berikutnya (maks [maxBatchSize]) + filter jendela backoff.
+  Future<List<Map<String, dynamic>>> _nextPendingBatch({
+    required bool force,
+  }) async {
+    var pending = await _db!.query(
+      'offline_orders',
+      where: 'synced = 0 AND attempts < $_maxAttempts',
+      orderBy: 'id ASC',
+      limit: maxBatchSize,
+    );
+    if (pending.isEmpty) return [];
 
     if (!force) {
       final now = DateTime.now();
@@ -301,35 +367,61 @@ class OfflineSyncService {
         return now.difference(lastAt).inSeconds >= _backoffFor(attempts);
       }).toList();
     }
-    if (pending.isEmpty) return 0;
+    return pending;
+  }
 
+  /// Kirim satu batch. Return jumlah order yang berhasil (created/duplicate).
+  Future<int> _sendBatch(List<Map<String, dynamic>> pending) async {
     final entries = <Map<String, dynamic>>[];
     for (final order in pending) {
       try {
-        entries.add(Map<String, dynamic>.from(
-            jsonDecode(order['payload'] as String)));
+        entries.add(
+          Map<String, dynamic>.from(jsonDecode(order['payload'] as String)),
+        );
       } catch (_) {
         await _db!.update(
-            'offline_orders',
-            {'attempts': _maxAttempts, 'last_error': 'Payload rusak'},
-            where: 'id = ?',
-            whereArgs: [order['id']]);
+          'offline_orders',
+          {'attempts': _maxAttempts, 'last_error': 'Payload rusak'},
+          where: 'id = ?',
+          whereArgs: [order['id']],
+        );
       }
     }
     if (entries.isEmpty) return 0;
 
     Map<String, Map<String, dynamic>> byUuid = {};
     try {
-      final res = await ApiService()
-          .post('/orders/sync-batch', body: {'orders': entries});
+      final res = await ApiService().post(
+        '/orders/sync-batch',
+        body: {'orders': entries},
+      );
       final data = res is Map ? res['data'] : null;
       if (data is List) {
         for (final r in data) {
-          if (r is Map) byUuid[r['client_uuid']?.toString() ?? ''] = Map<String, dynamic>.from(r);
+          if (r is Map) {
+            byUuid[r['client_uuid']?.toString() ?? ''] =
+                Map<String, dynamic>.from(r);
+          }
         }
       }
-    } catch (_) {
-      // Jaringan mati di tengah jalan — semua tetap pending, coba lagi nanti.
+    } on ApiNetworkException {
+      // Jaringan mati di tengah jalan — tanpa penalti, coba lagi nanti.
+      return 0;
+    } catch (e) {
+      // Server menolak seluruh batch (mis. 422) — tandai attempts supaya
+      // tidak retry tanpa henti dan kasir bisa melihat last_error.
+      for (final order in pending) {
+        await _db!.update(
+          'offline_orders',
+          {
+            'attempts': ((order['attempts'] as int?) ?? 0) + 1,
+            'last_error': e.toString(),
+            'last_attempt_at': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [order['id']],
+        );
+      }
       return 0;
     }
 
@@ -339,21 +431,24 @@ class OfflineSyncService {
       final r = byUuid[uuid];
       if (r != null &&
           (r['status'] == 'created' || r['status'] == 'duplicate')) {
-        await _db!.update('offline_orders', {
-          'synced': 1,
-          'last_error': null,
-        }, where: 'id = ?', whereArgs: [order['id']]);
+        await _db!.update(
+          'offline_orders',
+          {'synced': 1, 'last_error': null},
+          where: 'id = ?',
+          whereArgs: [order['id']],
+        );
         synced++;
       } else {
         await _db!.update(
-            'offline_orders',
-            {
-              'attempts': ((order['attempts'] as int?) ?? 0) + 1,
-              'last_error': r?['message']?.toString() ?? 'Gagal sinkron',
-              'last_attempt_at': DateTime.now().toIso8601String(),
-            },
-            where: 'id = ?',
-            whereArgs: [order['id']]);
+          'offline_orders',
+          {
+            'attempts': ((order['attempts'] as int?) ?? 0) + 1,
+            'last_error': r?['message']?.toString() ?? 'Gagal sinkron',
+            'last_attempt_at': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [order['id']],
+        );
       }
     }
     return synced;
@@ -362,17 +457,57 @@ class OfflineSyncService {
   Future<int> getPendingCount() async {
     if (_db == null) return 0;
     final result = await _db!.rawQuery(
-        'SELECT COUNT(*) as cnt FROM offline_orders WHERE synced = 0');
+      'SELECT COUNT(*) as cnt FROM offline_orders WHERE synced = 0',
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Antrean yang sudah kehabisan percobaan (attempts >= maks) — butuh
+  /// perhatian manual, bukan sekadar menunggu backoff.
+  Future<int> getFailedCount() async {
+    if (_db == null) return 0;
+    final result = await _db!.rawQuery(
+      'SELECT COUNT(*) as cnt FROM offline_orders '
+      'WHERE synced = 0 AND attempts >= $_maxAttempts',
+    );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<List<Map<String, dynamic>>> getPendingOrders() async {
     if (_db == null) return [];
-    return _db!.query('offline_orders',
-        where: 'synced = 0', orderBy: 'id ASC');
+    return _db!.query('offline_orders', where: 'synced = 0', orderBy: 'id ASC');
+  }
+
+  /// Reset percobaan antrean yang gagal permanen supaya bisa dikirim ulang
+  /// (mis. setelah masalah stok/koneksi diperbaiki). Return jumlah baris.
+  Future<int> resetFailedAttempts() async {
+    if (_db == null) return 0;
+    return _db!.update('offline_orders', {
+      'attempts': 0,
+      'last_error': null,
+    }, where: 'synced = 0 AND attempts >= $_maxAttempts');
+  }
+
+  /// Buang satu item antrean yang tidak mungkin tersinkron (mis. produk
+  /// sudah dihapus di server). Transaksi ini TIDAK tercatat di server.
+  Future<void> deleteQueueItem(int id) async {
+    if (_db == null) return;
+    await _db!.delete(
+      'offline_orders',
+      where: 'id = ? AND synced = 0',
+      whereArgs: [id],
+    );
+  }
+
+  /// Ringkasan antrean untuk layar Sinkronisasi: jumlah + error terakhir.
+  Future<Map<String, dynamic>> getQueueSummary() async {
+    final pending = await getPendingCount();
+    final failed = await getFailedCount();
+    return {'pending': pending, 'failed': failed};
   }
 
   Future<void> dispose() async {
     await _db?.close();
+    _db = null;
   }
 }

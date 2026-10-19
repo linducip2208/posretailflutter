@@ -15,12 +15,20 @@ class S {
     return out;
   }
 
-  static String t(BuildContext context, String id, [Map<String, String>? params]) {
+  static String t(
+    BuildContext context,
+    String id, [
+    Map<String, String>? params,
+  ]) {
     final lang = context.watch<LangProvider>();
     return e(lang.isEnglish, id, params);
   }
 
-  static String tn(BuildContext context, String id, [Map<String, String>? params]) {
+  static String tn(
+    BuildContext context,
+    String id, [
+    Map<String, String>? params,
+  ]) {
     final lang = context.read<LangProvider>();
     return e(lang.isEnglish, id, params);
   }

@@ -48,6 +48,17 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sesi berakhir karena token kedaluwarsa (401).
+  /// Membersihkan state lokal TANPA memanggil `/logout` agar tidak
+  /// memicu 401 berantai; token tersimpan sudah dibersihkan ApiService.
+  Future<void> expireSession() async {
+    await _authService.logoutLocal();
+    _user = null;
+    _outlets = [];
+    _currentOutlet = null;
+    notifyListeners();
+  }
+
   Future<bool> tryAutoLogin() async {
     final hasToken = await _authService.isLoggedIn();
     if (!hasToken) return false;

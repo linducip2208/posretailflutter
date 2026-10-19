@@ -17,8 +17,9 @@ Widget _wrap(Widget child) {
 
 void main() {
   group('Login screen', () {
-    testWidgets('menampilkan form email, password, tombol masuk',
-        (tester) async {
+    testWidgets('menampilkan form email, password, tombol masuk', (
+      tester,
+    ) async {
       await tester.pumpWidget(_wrap(const LoginScreen()));
       await tester.pump();
       expect(find.text('Masuk'), findsWidgets);

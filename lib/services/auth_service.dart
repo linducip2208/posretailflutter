@@ -8,10 +8,11 @@ class AuthService {
   static const _outletKey = 'current_outlet_id';
 
   Future<User> login(String email, String password) async {
-    final response = await _api.post('/login', body: {
-      'email': email,
-      'password': password,
-    }, auth: false);
+    final response = await _api.post(
+      '/login',
+      body: {'email': email, 'password': password},
+      auth: false,
+    );
 
     final token = response is Map ? response['token'] : null;
     if (token is! String || token.isEmpty) {
@@ -47,6 +48,12 @@ class AuthService {
       await _api.post('/logout');
     } catch (_) {}
     await _api.clearToken();
+  }
+
+  /// Bersihkan sesi lokal tanpa memanggil server (dipakai saat 401).
+  Future<void> logoutLocal() async {
+    await _api.clearToken();
+    await clearCurrentOutletId();
   }
 
   Future<bool> isLoggedIn() async {

@@ -24,7 +24,10 @@ class OutletSelectionScreen extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text(S.t(context, 'Pilih Outlet')), automaticallyImplyLeading: false),
+      appBar: AppBar(
+        title: Text(S.t(context, 'Pilih Outlet')),
+        automaticallyImplyLeading: false,
+      ),
       body: auth.outlets.isEmpty
           ? Center(
               child: Padding(
@@ -32,11 +35,17 @@ class OutletSelectionScreen extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.store_outlined, size: 64, color: Colors.grey.shade400),
+                    Icon(
+                      Icons.store_outlined,
+                      size: 64,
+                      color: Colors.grey.shade400,
+                    ),
                     const SizedBox(height: 12),
                     Text(
-                      S.t(context,
-                          'Akun ini belum memiliki akses outlet.\nHubungi pemilik/admin untuk akses.'),
+                      S.t(
+                        context,
+                        'Akun ini belum memiliki akses outlet.\nHubungi pemilik/admin untuk akses.',
+                      ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
@@ -66,14 +75,19 @@ class OutletSelectionScreen extends StatelessWidget {
                         backgroundColor: theme.colorScheme.primaryContainer,
                         child: const Icon(Icons.store),
                       ),
-                      title: Text(o.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(
+                        o.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       subtitle: o.code != null ? Text(o.code!) : null,
                       trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                       onTap: () async {
                         await auth.selectOutlet(o);
                         if (context.mounted) {
                           Navigator.of(context).pushReplacement(
-                            MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                            MaterialPageRoute(
+                              builder: (_) => const DashboardScreen(),
+                            ),
                           );
                         }
                       },

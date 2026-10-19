@@ -1,23 +1,40 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../l10n/lang_provider.dart';
 import '../../l10n/s.dart';
-import '../../models/product.dart';
+import '../../models/category.dart';
 import '../../models/customer.dart';
+import '../../models/order.dart';
+import '../../models/product.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/order_provider.dart';
 import '../../services/api_service.dart';
 import '../../services/offline_sync_service.dart';
 import '../../services/printer_service.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/formatters.dart';
 import '../../widgets/cart_item_tile.dart';
-import '../../widgets/product_card.dart';
+import '../../widgets/common/app_snackbar.dart';
+import '../../widgets/common/empty_state.dart';
+import '../../widgets/common/error_state.dart';
+import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/payment_dialog.dart';
+import '../../widgets/product_card.dart';
+import '../orders/orders_screen.dart';
 import '../outlet/outlet_selection_screen.dart';
 
+/// Layar kasir (POS) — diprioritaskan untuk kecepatan operasional:
+/// - satu tangan: checkout bar selalu terjangkau di bawah
+/// - tablet: keranjang panel samping
+/// - hasil transaksi hanya tampil setelah server mengonfirmasi
+///   (atau dicatat eksplisit sebagai antrean offline).
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
 
@@ -30,7 +47,13 @@ class _PosScreenState extends State<PosScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
   final PrinterService _printer = PrinterService();
   final OfflineSyncService _offline = OfflineSyncService();
+
   List<Product> _products = [];
+  List<Category> _categories = [];
+  int? _categoryId;
+  bool _isLoadingProducts = false;
+  String? _productError;
+
   bool _isScanning = false;
   String _queueNumber = '';
   bool _isInstallment = false;
@@ -39,10 +62,17 @@ class _PosScreenState extends State<PosScreen> {
   Customer? _selectedCustomer;
   bool _isOnline = true;
   bool _isProcessing = false;
+  bool _isSyncing = false;
   int _pendingSyncCount = 0;
+  int _failedSyncCount = 0;
   String? _lastBarcode;
   DateTime? _lastScanAt;
   late final void Function(bool) _connectivityListener;
+  String? _clientUuid;
+  String? _clientUuidFingerprint;
+  Timer? _searchDebounce;
+
+  static const Duration _searchDebounceDelay = Duration(milliseconds: 350);
 
   @override
   void initState() {
@@ -55,34 +85,20 @@ class _PosScreenState extends State<PosScreen> {
     _isOnline = _offline.isOnline;
     _connectivityListener = (online) {
       if (mounted) setState(() => _isOnline = online);
-      // Otomatis: hormati backoff. Manual (badge): force via _syncPending().
-      if (online) _syncPending(force: false);
+      if (online) {
+        _syncPending(force: false);
+        _refreshQueueCounts();
+      }
     };
     _offline.addListener(_connectivityListener);
+    _loadCategories();
     _loadProducts();
-    _refreshPendingCount();
-  }
-
-  Future<void> _refreshPendingCount() async {
-    final n = await _offline.getPendingCount();
-    if (mounted) setState(() => _pendingSyncCount = n);
-  }
-
-  Future<void> _syncPending({bool force = true}) async {
-    final en = context.read<LangProvider>().isEnglish;
-    // Aksi manual kasir (badge/connectivity) memakai force agar langsung coba.
-    final sent = await _offline.syncPendingOrders(force: force);
-    await _refreshPendingCount();
-    if (mounted && sent > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(S.e(en, '{n} transaksi offline berhasil dikirim', {'n': '$sent'}))),
-      );
-    }
+    _refreshQueueCounts();
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _offline.removeListener(_connectivityListener);
     super.dispose();
@@ -90,76 +106,134 @@ class _PosScreenState extends State<PosScreen> {
 
   int? get _outletId => context.read<AuthProvider>().currentOutletId;
 
-  List<Product> _parseProducts(dynamic data) {
-    if (data is! List) return [];
-    return data
-        .whereType<Map<String, dynamic>>()
-        .map(Product.fromJson)
-        .toList();
+  // ---------------------------------------------------------------- produk
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(_searchDebounceDelay, () {
+      _loadProducts(search: value.trim());
+    });
   }
 
-  Future<void> _search(String query) async {
-    if (query.isEmpty) {
-      await _loadProducts();
-      return;
+  Future<void> _loadCategories() async {
+    try {
+      final response = await _api.get('/categories');
+      final dynamic data = response is Map
+          ? (response['categories'] ?? response['data'] ?? response)
+          : response;
+      if (!mounted || data is! List) return;
+      final parsed = data
+          .whereType<Map<String, dynamic>>()
+          .map(Category.fromJson)
+          .toList();
+      setState(() => _categories = parsed);
+    } catch (_) {
+      // Kategori pelengkap — kegagalan tidak memblokir kasir.
     }
+  }
+
+  /// Daftar kategori datar (induk + anak) untuk chip filter.
+  List<Category> get _flatCategories {
+    final out = <Category>[];
+    for (final c in _categories) {
+      out.add(c);
+      out.addAll(c.children);
+    }
+    return out;
+  }
+
+  Future<void> _loadProducts({String? search}) async {
+    final query = search ?? _searchCtrl.text.trim();
+    setState(() {
+      _isLoadingProducts = true;
+      _productError = null;
+    });
+
     if (_isOnline) {
       try {
-        final response = await _api.get('/products?search=$query');
-        final data = response['data'] ?? response;
-        final products = _parseProducts(data);
+        final response = await _api.get(
+          '/products',
+          query: {
+            'search': query.isEmpty ? null : query,
+            'category_id': _categoryId?.toString(),
+            'per_page': '50',
+          },
+        );
+        final dynamic data = response is Map
+            ? (response['data'] ?? response)
+            : response;
+        final list = data is List
+            ? data.whereType<Map<String, dynamic>>().toList()
+            : <Map<String, dynamic>>[];
         if (!mounted) return;
-        setState(() => _products = products);
+        setState(() {
+          _products = list.map(Product.fromJson).toList();
+          _isLoadingProducts = false;
+        });
         final outletId = _outletId;
-        if (outletId != null && data is List) {
-          await _offline.cacheProducts(
-              data.whereType<Map<String, dynamic>>().toList(),
-              outletId: outletId);
+        if (outletId != null && list.isNotEmpty) {
+          await _offline.cacheProducts(list, outletId: outletId);
+        }
+        return;
+      } on ApiException catch (e) {
+        // Jaringan bermasalah → fallback cache lokal (tetap outlet-aware).
+        if (e is! ApiNetworkException) {
+          if (mounted) {
+            setState(() {
+              _productError = e.message;
+              _isLoadingProducts = false;
+            });
+          }
+          return;
         }
       } catch (_) {
-        await _searchOffline(query);
+        // jatuh ke cache lokal
       }
-    } else {
-      await _searchOffline(query);
     }
+    await _searchOffline(query);
   }
 
-  Future<void> _loadProducts() async {
-    if (_isOnline) {
-      try {
-        final response = await _api.get('/products?per_page=50');
-        final data = response['data'] ?? response;
-        final products = _parseProducts(data);
-        if (!mounted) return;
-        setState(() => _products = products);
-        final outletId = _outletId;
-        if (outletId != null && data is List) {
-          await _offline.cacheProducts(
-              data.whereType<Map<String, dynamic>>().toList(),
-              outletId: outletId);
-        }
-      } catch (_) {
-        await _searchOffline(null);
-      }
-    } else {
-      await _searchOffline(null);
-    }
-  }
-
-  Future<void> _searchOffline(String? query) async {
+  Future<void> _searchOffline(String query) async {
     final outletId = _outletId;
     if (outletId == null) {
-      if (mounted) setState(() => _products = []);
+      if (mounted) {
+        setState(() {
+          _products = [];
+          _isLoadingProducts = false;
+          _productError = S.tn(
+            context,
+            'Pilih outlet dulu untuk memuat produk offline.',
+          );
+        });
+      }
       return;
     }
-    final results = await _offline.searchProducts(query, outletId: outletId);
-    if (!mounted) return;
-    setState(() =>
-        _products = results.map(Product.fromJson).toList());
+    try {
+      final results = await _offline.searchProducts(
+        query.isEmpty ? null : query,
+        outletId: outletId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _products = results.map(Product.fromJson).toList();
+        _isLoadingProducts = false;
+        _productError = results.isEmpty
+            ? S.tn(
+                context,
+                'Tidak ada cache produk untuk outlet ini. Sambungkan ke internet untuk memuat katalog.',
+              )
+            : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingProducts = false;
+        _productError = S.tn(context, 'Gagal membaca cache produk.');
+      });
+    }
   }
 
   Future<void> _scanBarcode(String barcode) async {
-    // Debounce: abaikan hasil scan yang sama dalam 1,5 detik (anti double-add).
     final now = DateTime.now();
     if (_lastBarcode == barcode &&
         _lastScanAt != null &&
@@ -168,12 +242,17 @@ class _PosScreenState extends State<PosScreen> {
     }
     _lastBarcode = barcode;
     _lastScanAt = now;
-    final en = context.read<LangProvider>().isEnglish;
+
     try {
       Map<String, dynamic>? productData;
       if (_isOnline) {
-        final response = await _api.post('/products/barcode', body: {'barcode': barcode});
-        final data = response['data'] ?? response;
+        final response = await _api.post(
+          '/products/barcode',
+          body: {'barcode': barcode},
+        );
+        final dynamic data = response is Map
+            ? (response['data'] ?? response)
+            : response;
         productData = data is Map<String, dynamic> ? data : null;
       } else {
         final outletId = _outletId;
@@ -182,38 +261,230 @@ class _PosScreenState extends State<PosScreen> {
             : await _offline.getProductByBarcode(barcode, outletId: outletId);
       }
 
+      if (!mounted) return;
       if (productData != null && productData.isNotEmpty) {
         final product = Product.fromJson(productData);
-        if (!mounted) return;
-        context.read<CartProvider>().addItem(product);
+        _addToCart(product, scannedBarcode: barcode);
         setState(() => _isScanning = false);
       } else {
-        _showError('${S.e(en, 'Produk tidak ditemukan')}: $barcode');
+        _showSnack('Produk tidak ditemukan: $barcode', SnackType.error);
       }
-    } catch (e) {
-      _showError('${S.e(en, 'Produk tidak ditemukan')}: $barcode');
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) {
+        _showSnack('Produk tidak ditemukan: $barcode', SnackType.error);
+      } else if (e is ApiNetworkException) {
+        final outletId = _outletId;
+        final cached = outletId == null
+            ? null
+            : await _offline.getProductByBarcode(barcode, outletId: outletId);
+        if (!mounted) return;
+        if (cached != null) {
+          _addToCart(Product.fromJson(cached), scannedBarcode: barcode);
+          setState(() => _isScanning = false);
+        } else {
+          _showSnack(e.message, SnackType.error);
+        }
+      } else {
+        _showSnack(e.message, SnackType.error);
+      }
+    } catch (_) {
+      _showSnack('Gagal memproses barcode: $barcode', SnackType.error);
     }
   }
 
+  void _addToCart(Product product, {String? scannedBarcode}) {
+    if (product.hasVariants) {
+      _pickVariant(product, scannedBarcode: scannedBarcode);
+      return;
+    }
+    if (product.currentStock <= 0) {
+      _showSnack(
+        'Stok "${product.name}" habis di outlet ini.',
+        SnackType.warning,
+      );
+      return;
+    }
+    context.read<CartProvider>().addItem(product);
+  }
+
+  /// Pilih varian sebelum masuk keranjang (harga & stok per varian
+  /// divalidasi server saat checkout).
+  Future<void> _pickVariant(Product product, {String? scannedBarcode}) async {
+    final theme = Theme.of(context);
+    int? preselectedId;
+    if (scannedBarcode != null) {
+      for (final v in product.variants) {
+        if (v.barcode == scannedBarcode) {
+          preselectedId = v.id;
+          break;
+        }
+      }
+    }
+
+    final variant = await showModalBottomSheet<ProductVariant>(
+      context: context,
+      useSafeArea: true,
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  style: theme.textTheme.titleMedium?.copyWith(fontSize: 16),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  S.t(sheetContext, 'Pilih varian'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: product.variants.length,
+              itemBuilder: (_, i) {
+                final variant = product.variants[i];
+                final soldOut = variant.currentStock <= 0;
+                final isPreselected = variant.id == preselectedId;
+                return ListTile(
+                  enabled: !soldOut,
+                  leading: CircleAvatar(
+                    backgroundColor: soldOut
+                        ? AppColors.errorSoft
+                        : AppColors.primarySoft,
+                    child: Icon(
+                      soldOut ? Icons.block : Icons.inventory_2_outlined,
+                      size: 18,
+                      color: soldOut ? AppColors.error : AppColors.primaryDark,
+                    ),
+                  ),
+                  title: Text(
+                    variant.name,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: Text(
+                    soldOut
+                        ? S.t(sheetContext, 'Stok habis')
+                        : '${S.t(sheetContext, 'Stok')}: ${variant.currentStock}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: soldOut ? AppColors.error : null,
+                    ),
+                  ),
+                  trailing: Text(
+                    Fmt.rupiah(
+                      variant.sellingPrice > 0
+                          ? variant.sellingPrice
+                          : product.sellingPrice,
+                    ),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  selected: isPreselected,
+                  onTap: soldOut
+                      ? null
+                      : () => Navigator.pop(sheetContext, variant),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+      ),
+    );
+
+    if (variant == null || !mounted) return;
+    context.read<CartProvider>().addItem(product, variant: variant);
+  }
+
+  // -------------------------------------------------------------------- cart
+
+  Future<void> _refreshQueueCounts() async {
+    final pending = await _offline.getPendingCount();
+    final failed = await _offline.getFailedCount();
+    if (mounted) {
+      setState(() {
+        _pendingSyncCount = pending;
+        _failedSyncCount = failed;
+      });
+    }
+  }
+
+  /// UUID checkout stabil: satu isi keranjang = satu client_uuid sehingga
+  /// retry setelah timeout / fallback offline tidak membuat order ganda.
+  String _clientUuidFor(Map<String, dynamic> payload) {
+    final fingerprint = jsonEncode(payload['items']);
+    if (_clientUuid == null || _clientUuidFingerprint != fingerprint) {
+      _clientUuid = const Uuid().v4();
+      _clientUuidFingerprint = fingerprint;
+    }
+    return _clientUuid!;
+  }
+
+  Future<void> _syncPending({bool force = true}) async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
+    final en = context.read<LangProvider>().isEnglish;
+    final sent = await _offline.syncPendingOrders(force: force);
+    await _refreshQueueCounts();
+    if (!mounted) return;
+    setState(() => _isSyncing = false);
+    if (sent > 0) {
+      _showSnack(
+        S.e(en, '{n} transaksi offline berhasil dikirim', {'n': '$sent'}),
+        SnackType.success,
+      );
+    } else if (_pendingSyncCount > 0) {
+      _showSnack(
+        S.tn(context, 'Belum ada transaksi yang berhasil dikirim.'),
+        SnackType.warning,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------- checkout
+
   Future<void> _checkout() async {
-    if (_isProcessing) return; // anti double-tap
+    if (_isProcessing) return;
     final cart = context.read<CartProvider>();
     if (cart.items.isEmpty) return;
 
-    final result = await showDialog<List<PaymentEntry>>(
-      context: context,
-      builder: (_) => const PaymentDialog(),
-    );
-
-    if (result != null && result.isNotEmpty && mounted) {
-      _processOrder(result);
+    if (_isInstallment && _selectedCustomer == null) {
+      _showSnack(
+        'Pilih pelanggan dulu untuk transaksi cicilan/kasbon.',
+        SnackType.warning,
+      );
+      return;
     }
+
+    final entries = await PaymentDialog.show(
+      context,
+      total: cart.totalAmount,
+      allowPartial: _isInstallment,
+    );
+    if (entries == null || entries.isEmpty || !mounted) return;
+    await _processOrder(entries);
   }
 
   Future<void> _processOrder(List<PaymentEntry> paymentEntries) async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
     final en = context.read<LangProvider>().isEnglish;
+
     try {
       final cart = context.read<CartProvider>();
       final orderProvider = context.read<OrderProvider>();
@@ -221,71 +492,66 @@ class _PosScreenState extends State<PosScreen> {
 
       final outletId = auth.currentOutletId;
       if (outletId == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(S.e(en, 'Pilih outlet dulu sebelum transaksi')),
-                backgroundColor: Colors.red),
-          );
-        }
+        _showSnack(
+          S.e(en, 'Pilih outlet dulu sebelum transaksi'),
+          SnackType.error,
+        );
         return;
       }
 
       final payload = cart.toOrderPayload();
-      payload['client_uuid'] = const Uuid().v4();
+      payload['client_uuid'] = _clientUuidFor(payload);
       payload['outlet_id'] = outletId;
       payload['employee_id'] = auth.user?.id;
       payload['is_installment'] = _isInstallment;
-      payload['installment_period'] = _isInstallment ? _installmentPeriod : null;
+      payload['installment_period'] = _isInstallment
+          ? _installmentPeriod
+          : null;
       payload['installment_count'] = _isInstallment ? _installmentCount : 1;
-      payload['payments'] = paymentEntries.map((e) => {
-        'payment_method_id': e.method.id,
-        'amount': e.amount,
-      }).toList();
+      payload['payments'] = paymentEntries
+          .map((e) => {'payment_method_id': e.method.id, 'amount': e.amount})
+          .toList();
 
       if (!_isOnline) {
-        await _offline.queueOrder(payload);
-        cart.clear();
-        _selectedCustomer = null;
-        await _refreshPendingCount();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(S.e(en, 'Pesanan tersimpan di perangkat ({n} menunggu kirim). Bukan bukti lunas server.',
-                  {'n': '$_pendingSyncCount'})),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
+        await _queueOffline(payload, cart);
         return;
       }
 
       final order = await orderProvider.createOrder(payload);
 
+      if (order == null && orderProvider.lastErrorOffline) {
+        await _queueOffline(payload, cart);
+        return;
+      }
+
+      if (order != null) {
+        _clientUuid = null;
+        _clientUuidFingerprint = null;
+      }
+
       if (!mounted) return;
       if (order != null) {
         cart.clear();
-        _selectedCustomer = null;
-        _queueNumber = order.orderNumber;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(S.e(en, 'Pesanan {no} berhasil!{antri}', {
-              'no': order.orderNumber,
-              'antri': order.queueNumber != null
-                  ? ' ${S.e(en, 'Antrian')}: ${order.queueNumber}'
-                  : ''
-            })),
-            backgroundColor: Colors.green,
-          ),
+        setState(() {
+          _selectedCustomer = null;
+          _isInstallment = false;
+          _queueNumber = order.orderNumber;
+        });
+        _showSnack(
+          S.e(en, 'Pesanan {no} berhasil!{antri}', {
+            'no': order.orderNumber,
+            'antri': order.queueNumber != null
+                ? ' ${S.e(en, 'Antrian')}: ${order.queueNumber}'
+                : '',
+          }),
+          SnackType.success,
         );
-        _showPrintReceiptDialog(order);
+        await _showReceiptSheet(order);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(orderProvider.error ??
-                S.e(en, 'Transaksi gagal, tidak ada order dibuat')),
-            backgroundColor: Colors.red,
-          ),
+        _showSnack(
+          orderProvider.error ??
+              S.e(en, 'Transaksi gagal, tidak ada order dibuat'),
+          SnackType.error,
         );
       }
     } finally {
@@ -293,141 +559,217 @@ class _PosScreenState extends State<PosScreen> {
     }
   }
 
-  Future<void> _showPrintReceiptDialog(dynamic order) async {
+  /// Simpan transaksi ke antrean offline — TIDAK diklaim lunas oleh server.
+  Future<void> _queueOffline(
+    Map<String, dynamic> payload,
+    CartProvider cart,
+  ) async {
+    final en = context.read<LangProvider>().isEnglish;
+    await _offline.queueOrder(payload);
+    _clientUuid = null;
+    _clientUuidFingerprint = null;
+    cart.clear();
+    await _refreshQueueCounts();
+    if (!mounted) return;
+    setState(() => _selectedCustomer = null);
+    _showSnack(
+      S.e(
+        en,
+        'Pesanan tersimpan di perangkat ({n} menunggu kirim). Bukan bukti lunas server.',
+        {'n': '$_pendingSyncCount'},
+      ),
+      SnackType.warning,
+      duration: const Duration(seconds: 5),
+    );
+  }
+
+  // ------------------------------------------------------------------ receipt
+
+  Future<void> _showReceiptSheet(Order order) async {
     final auth = context.read<AuthProvider>();
-    String safeName(dynamic v) {
-      final s = v?.toString() ?? 'Item';
-      return s.length > 18 ? s.substring(0, 18) : s;
-    }
+    final outletName = auth.currentOutlet?.name;
+    final cashier = auth.user?.name ?? 'Kasir';
 
     double safeNum(dynamic v) {
       if (v is num) return v.toDouble();
       return double.tryParse(v?.toString() ?? '') ?? 0;
     }
 
-    final items = (order.items as List?)?.map((i) => {
-      'name': safeName(i.productName),
-      'qty': (i.quantity as int?) ?? 0,
-      'price': safeNum(i.unitPrice),
-      'subtotal': safeNum(i.subtotal),
-    }).toList() ?? [];
+    final items =
+        order.items
+            ?.map(
+              (i) => {
+                'name': i.productName,
+                'qty': i.quantity,
+                'price': i.unitPrice,
+                'subtotal': i.subtotal,
+              },
+            )
+            .toList() ??
+        [];
 
-    final paid = (order.payments as List?)?.fold<double>(0, (s, p) => s + safeNum(p.amount)) ?? safeNum(order.totalAmount);
-    final change = paid - order.totalAmount;
+    final paid = order.payments?.fold<double>(0, (s, p) => s + p.amount) ?? 0;
+    final total = safeNum(order.totalAmount);
+    final remaining = (total - paid).clamp(0, double.infinity).toDouble();
+    final change = (paid - total).clamp(0, double.infinity).toDouble();
 
     final result = await showModalBottomSheet<String>(
       context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(S.t(context, 'Cetak Struk'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+      useSafeArea: true,
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.check_circle,
+                  color: AppColors.success,
+                  size: 40,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  S.t(sheetContext, 'Transaksi Berhasil'),
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${order.orderNumber}${order.queueNumber != null ? ' · ${S.t(sheetContext, 'Antrian')} ${order.queueNumber}' : ''}',
+                  style: Theme.of(sheetContext).textTheme.bodySmall,
+                ),
+                if (remaining > 0) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.xs,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.warningSoft,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: Text(
+                      '${S.t(sheetContext, 'Sisa tagihan (kasbon)')}: '
+                      '${Fmt.rupiah(remaining)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFB45309),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-            if (_printer.isConnected)
-              ListTile(
-                leading: const Icon(Icons.bluetooth),
-                title: Text(S.t(context, 'Print Bluetooth')),
-                subtitle: Text(S.t(context, 'Cetak ke printer thermal Bluetooth')),
-                onTap: () {
-                  Navigator.pop(context, 'bluetooth');
-                },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: Text(S.t(sheetContext, 'Lihat Detail Transaksi')),
+            onTap: () => Navigator.pop(sheetContext, 'detail'),
+          ),
+          if (_printer.isConnected)
+            ListTile(
+              leading: const Icon(Icons.bluetooth),
+              title: Text(S.t(sheetContext, 'Print Bluetooth')),
+              subtitle: Text(
+                S.t(sheetContext, 'Cetak ke printer thermal Bluetooth'),
               ),
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf),
-                title: Text(S.t(context, 'Share / Print PDF')),
-                subtitle: Text(S.t(context, 'Share via WhatsApp, simpan ke HP, atau print')),
-              onTap: () {
-                Navigator.pop(context, 'pdf');
-              },
+              onTap: () => Navigator.pop(sheetContext, 'bluetooth'),
             ),
-            ListTile(
-              leading: const Icon(Icons.print),
-                title: Text(S.t(context, 'Print Langsung')),
-                subtitle: Text(S.t(context, 'Print ke printer via sistem Android')),
-              onTap: () {
-                Navigator.pop(context, 'printer');
-              },
+          ListTile(
+            leading: const Icon(Icons.picture_as_pdf_outlined),
+            title: Text(S.t(sheetContext, 'Share / Print PDF')),
+            subtitle: Text(
+              S.t(sheetContext, 'Share via WhatsApp, simpan ke HP, atau print'),
             ),
-            ListTile(
-              leading: const Icon(Icons.close),
-                title: Text(S.t(context, 'Nanti Saja')),
-              onTap: () {
-                Navigator.pop(context, null);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+            onTap: () => Navigator.pop(sheetContext, 'pdf'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.close),
+            title: Text(S.t(sheetContext, 'Selesai')),
+            onTap: () => Navigator.pop(sheetContext, null),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
       ),
     );
 
     if (result == null || !mounted) return;
 
+    if (result == 'detail') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => OrdersScreen(initialOrderId: order.id),
+        ),
+      );
+      return;
+    }
+
     final pdfBytes = await _printer.generatePdfReceipt(
       orderNumber: order.orderNumber,
       date: DateTime.now(),
-      cashier: auth.user?.name ?? 'Kasir',
+      cashier: cashier,
+      outletName: outletName,
       items: items,
-      subtotal: order.subtotal,
-      discount: order.discountAmount,
-      tax: order.taxAmount,
-      total: order.totalAmount,
+      subtotal: safeNum(order.subtotal),
+      discount: safeNum(order.discountAmount),
+      tax: safeNum(order.taxAmount),
+      total: total,
       paid: paid,
       change: change,
+      remaining: remaining,
       customerName: order.customerName,
     );
 
-    switch (result) {
-      case 'bluetooth':
-        await _printReceipt(order);
-      case 'pdf':
-      case 'printer':
-        await _printer.shareReceiptPdf(pdfBytes, orderNumber: order.orderNumber);
-        return;
+    if (result == 'bluetooth') {
+      await _printer.printReceipt(
+        orderNumber: order.orderNumber,
+        date: DateTime.now(),
+        cashier: cashier,
+        outletName: outletName,
+        items: items,
+        subtotal: safeNum(order.subtotal),
+        discount: safeNum(order.discountAmount),
+        tax: safeNum(order.taxAmount),
+        total: total,
+        paid: paid,
+        change: change,
+        remaining: remaining,
+        customerName: order.customerName,
+      );
+      if (mounted) {
+        _showSnack(
+          S.tn(context, 'Struk dikirim ke printer Bluetooth.'),
+          SnackType.info,
+        );
+      }
+    } else if (result == 'pdf') {
+      await _printer.shareReceiptPdf(pdfBytes, orderNumber: order.orderNumber);
     }
   }
 
-  Future<void> _printReceipt(dynamic order) async {
-    final auth = context.read<AuthProvider>();
-    await _printer.printReceipt(
-      orderNumber: order.orderNumber,
-      date: DateTime.now(),
-      cashier: auth.user?.name ?? 'Kasir',
-      items: (order.items as List?)?.map((i) => {
-        'name': i.productName,
-        'qty': i.quantity,
-        'price': i.unitPrice,
-        'subtotal': i.subtotal,
-      }).toList() ?? [],
-      subtotal: order.subtotal,
-      discount: order.discountAmount,
-      tax: order.taxAmount,
-      total: order.totalAmount,
-      paid: (order.payments as List?)?.fold<double>(0, (s, p) => s + (p.amount as double)) ?? order.totalAmount,
-      change: ((order.payments as List?)?.fold<double>(0, (s, p) => s + (p.amount as double)) ?? order.totalAmount) - order.totalAmount,
-      customerName: order.customerName,
-    );
-  }
+  // ---------------------------------------------------------------- customer
 
   Future<void> _selectCustomer() async {
     final customer = await showDialog<Customer>(
       context: context,
       builder: (_) => const CustomerSearchDialog(),
     );
-    if (customer != null) {
-      if (!mounted) return;
+    if (customer != null && mounted) {
       setState(() => _selectedCustomer = customer);
       context.read<CartProvider>().setCustomer(customer.id, customer.name);
     }
   }
 
+  // ----------------------------------------------------------------- printer
+
   Future<void> _connectPrinter() async {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(S.t(context, 'Printer Bluetooth')),
+      builder: (dialogContext) => AlertDialog(
+        title: Text(S.t(dialogContext, 'Printer Bluetooth')),
         content: SizedBox(
           width: double.maxFinite,
           height: 300,
@@ -440,8 +782,14 @@ class _PosScreenState extends State<PosScreen> {
               final devices = snapshot.data ?? [];
               if (devices.isEmpty) {
                 return Center(
-                    child: Text(S.t(context,
-                        'Tidak ada printer ditemukan.\nPastikan Bluetooth aktif.')));
+                  child: Text(
+                    S.t(
+                      ctx,
+                      'Tidak ada printer ditemukan.\nPastikan Bluetooth aktif.',
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                );
               }
               return ListView.builder(
                 itemCount: devices.length,
@@ -449,16 +797,22 @@ class _PosScreenState extends State<PosScreen> {
                   final d = devices[i];
                   return ListTile(
                     leading: const Icon(Icons.print),
-                    title: Text(d.platformName.isNotEmpty ? d.platformName : d.remoteId.toString()),
+                    title: Text(
+                      d.platformName.isNotEmpty
+                          ? d.platformName
+                          : d.remoteId.toString(),
+                    ),
                     subtitle: Text(d.remoteId.toString()),
                     onTap: () async {
                       Navigator.pop(ctx);
                       final ok = await _printer.connect(d);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(ok ? 'Terhubung ke printer' : 'Gagal terhubung')),
-                        );
-                      }
+                      if (!mounted) return;
+                      _showSnack(
+                        ok
+                            ? 'Terhubung ke printer'
+                            : 'Gagal terhubung ke printer',
+                        ok ? SnackType.success : SnackType.error,
+                      );
                     },
                   );
                 },
@@ -467,309 +821,813 @@ class _PosScreenState extends State<PosScreen> {
           ),
         ),
         actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text(S.t(context, 'Tutup')))
-      ],
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(S.t(dialogContext, 'Tutup')),
+          ),
+        ],
       ),
     );
   }
 
-  void _showError(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red),
-      );
-    }
+  void _showSnack(
+    String message,
+    SnackType type, {
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    if (!mounted) return;
+    showAppSnackbar(context, message, type: type, duration: duration);
   }
+
+  // -------------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
-    final cart = context.watch<CartProvider>();
-    final theme = Theme.of(context);
-    final format = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        return Column(
+          children: [
+            _buildHeader(context),
+            if (_isScanning) _buildScannerPanel(context),
+            Expanded(
+              child: isWide
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: _buildProductArea()),
+                        _buildCartPanel(context, wide: true),
+                      ],
+                    )
+                  : _buildProductArea(),
+            ),
+            if (!isWide) _buildCheckoutBar(context),
+          ],
+        );
+      },
+    );
+  }
 
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          color: theme.colorScheme.surfaceContainerHighest,
-          child: SafeArea(
-            bottom: false,
-            child: Column(
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surface,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.sm,
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchCtrl,
-                        decoration: InputDecoration(
-                          hintText: S.t(context, 'Cari produk atau scan barcode...'),
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchCtrl.text.isNotEmpty
-                              ? IconButton(icon: const Icon(Icons.clear), onPressed: () { _searchCtrl.clear(); _loadProducts(); })
-                              : null,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          filled: true,
-                          fillColor: theme.colorScheme.surface,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                        ),
-                        onChanged: (v) => _search(v),
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: S.t(
+                        context,
+                        'Cari produk atau scan barcode...',
                       ),
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      suffixIcon: _searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                _loadProducts(search: '');
+                              },
+                            )
+                          : null,
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      icon: Icon(_isScanning ? Icons.close : Icons.qr_code_scanner),
-                      onPressed: () => setState(() => _isScanning = !_isScanning),
-                    ),
-                    IconButton.filled(
-                      icon: const Icon(Icons.bluetooth_connected),
-                      onPressed: _connectPrinter,
-                    ),
-                    IconButton.filled(
-                      icon: const Icon(Icons.person_add),
-                      onPressed: _selectCustomer,
-                    ),
-                  ],
+                    onChanged: _onSearchChanged,
+                    onSubmitted: (v) {
+                      _searchDebounce?.cancel();
+                      _loadProducts(search: v.trim());
+                    },
+                  ),
                 ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Builder(builder: (ctx) {
-                      final outlet = ctx.watch<AuthProvider>().currentOutlet;
-                      return ActionChip(
-                        avatar: const Icon(Icons.store, size: 16),
-                        label: Text(outlet?.name ?? S.t(context, 'Pilih outlet'),
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const OutletSelectionScreen()),
-                          );
-                        },
-                      );
-                    }),
-                    const SizedBox(width: 4),
-                    if (!_isOnline) ...[
-                      const SizedBox(width: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade100,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text('OFFLINE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.orange)),
-                      ),
-                    ],
-                    if (_pendingSyncCount > 0) ...[
-                      const SizedBox(width: 4),
-                      ActionChip(
-                        avatar: const Icon(Icons.sync_problem, size: 14),
-                        label: Text('$_pendingSyncCount ${S.t(context, 'menunggu kirim')}',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                        onPressed: _isOnline ? () => _syncPending(force: true) : null,
-                      ),
-                    ],
-                    const Spacer(),
-                    if (_queueNumber.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text('${S.t(context, 'Antrian')}: $_queueNumber',
-                            style: TextStyle(fontWeight: FontWeight.w700, color: theme.colorScheme.onPrimaryContainer)),
-                      ),
-                    ],
-                  ],
-                ),
-                Row(
-                  children: [
-                    if (_selectedCustomer != null) ...[
-                      Chip(
-                        avatar: const Icon(Icons.person, size: 16),
-                        label: Text(_selectedCustomer!.name, style: const TextStyle(fontSize: 11)),
-                        deleteIcon: const Icon(Icons.close, size: 16),
-                        onDeleted: () {
-                          setState(() => _selectedCustomer = null);
-                          context.read<CartProvider>().setCustomer(null, null);
-                        },
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    FilterChip(
-                      label: Text(S.t(context, 'Cicilan/Kasbon'), style: const TextStyle(fontSize: 11)),
-                      selected: _isInstallment,
-                      onSelected: (v) => setState(() => _isInstallment = v),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    if (_isInstallment) ...[
-                      const SizedBox(width: 6),
-                      SizedBox(
-                        width: 90,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _installmentPeriod,
-                          isDense: true,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          ),
-                          style: const TextStyle(fontSize: 12),
-                          items: [
-                            DropdownMenuItem(value: 'weekly', child: Text(S.t(context, 'Mingguan'), style: const TextStyle(fontSize: 11))),
-                            DropdownMenuItem(value: 'biweekly', child: Text(S.t(context, '2 Minggu'), style: const TextStyle(fontSize: 11))),
-                            DropdownMenuItem(value: 'monthly', child: Text(S.t(context, 'Bulanan'), style: const TextStyle(fontSize: 11))),
-                          ],
-                          onChanged: (v) => setState(() => _installmentPeriod = v!),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      SizedBox(
-                        width: 60,
-                        child: TextField(
-                          decoration: const InputDecoration(
-                            labelText: 'Jml',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                            isDense: true,
-                          ),
-                          keyboardType: TextInputType.number,
-                          style: const TextStyle(fontSize: 12),
-                          onChanged: (v) => _installmentCount = int.tryParse(v) ?? 1,
-                        ),
-                      ),
-                    ],
-                  ],
+                const SizedBox(width: AppSpacing.sm),
+                IconButton.filled(
+                  tooltip: S.t(context, 'Scan barcode'),
+                  icon: Icon(_isScanning ? Icons.close : Icons.qr_code_scanner),
+                  onPressed: () => setState(() => _isScanning = !_isScanning),
                 ),
               ],
             ),
-          ),
-        ),
-
-        if (_isScanning)
-          SizedBox(
-            height: 180,
-            child: MobileScanner(
-              onDetect: (capture) {
-                final barcodes = capture.barcodes;
-                if (barcodes.isNotEmpty) {
-                  final barcode = barcodes.first.rawValue;
-                  if (barcode != null) _scanBarcode(barcode);
-                }
-              },
-            ),
-          ),
-
-        Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                flex: 3,
-                child: _buildProductGrid(),
-              ),
-              Container(
-                width: 300,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerLow,
-                  border: Border(left: BorderSide(color: theme.dividerColor)),
-                ),
-                child: _buildCartPanel(cart, theme, format),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProductGrid() {
-    if (_products.isEmpty) {
-      return Center(child: Text(S.t(context, 'Tidak ada produk')));
-    }
-    return GridView.builder(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 180,
-        mainAxisExtent: 110,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
-      ),
-      itemCount: _products.length,
-      itemBuilder: (_, i) => ProductCard(
-        product: _products[i],
-        onTap: () => context.read<CartProvider>().addItem(_products[i]),
-      ),
-    );
-  }
-
-  Widget _buildCartPanel(CartProvider cart, ThemeData theme, NumberFormat format) {
-    if (cart.items.isEmpty) {
-      return Center(child: Text(S.t(context, 'Keranjang kosong'), style: const TextStyle(color: Colors.grey)));
-    }
-
-    final items = cart.items;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('${S.t(context, 'Keranjang')} (${cart.itemCount})',
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-              Text(format.format(cart.totalAmount),
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: theme.colorScheme.primary)),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            physics: const ClampingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            itemCount: items.length + 1,
-            itemBuilder: (_, i) {
-              if (i < items.length) {
-                return CartItemTile(
-                  item: items[i],
-                  index: i,
-                  onQuantityChanged: (idx, qty) => cart.updateQuantity(idx, qty),
-                  onDiscountChanged: (idx, pct) => cart.updateDiscount(idx, pct),
-                  onRemove: () => cart.removeItem(i),
-                );
-              }
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: _isProcessing ? null : _checkout,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.colorScheme.primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Flexible(
+                  child: ActionChip(
+                    avatar: const Icon(Icons.store, size: 16),
+                    label: Text(
+                      context.watch<AuthProvider>().currentOutlet?.name ??
+                          S.t(context, 'Pilih outlet'),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    child: _isProcessing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : Text('${S.t(context, 'Bayar')} ${format.format(cart.totalAmount)}',
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                    onPressed: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const OutletSelectionScreen(),
+                        ),
+                      );
+                      // Outlet bisa berubah — muat ulang katalog outlet baru.
+                      _categoryId = null;
+                      await _loadProducts();
+                      _refreshQueueCounts();
+                    },
                   ),
                 ),
-              );
+                const SizedBox(width: AppSpacing.xs),
+                if (!_isOnline)
+                  const Padding(
+                    padding: EdgeInsets.only(right: AppSpacing.xs),
+                    child: StatusChipOffline(),
+                  ),
+                if (_pendingSyncCount > 0)
+                  Flexible(
+                    child: ActionChip(
+                      avatar: _isSyncing
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              _failedSyncCount > 0
+                                  ? Icons.sync_problem
+                                  : Icons.sync,
+                              size: 14,
+                            ),
+                      label: Text(
+                        '$_pendingSyncCount ${S.t(context, 'menunggu kirim')}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      onPressed: _isOnline && !_isSyncing
+                          ? () => _syncPending(force: true)
+                          : null,
+                    ),
+                  ),
+                const Spacer(),
+                IconButton(
+                  tooltip: S.t(context, 'Riwayat transaksi'),
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const OrdersScreen()),
+                  ),
+                ),
+                IconButton(
+                  tooltip: S.t(context, 'Cetak / printer'),
+                  icon: const Icon(Icons.print_outlined),
+                  onPressed: _connectPrinter,
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: S.t(context, 'Pilih pelanggan'),
+                  icon: const Icon(Icons.person_outline, size: 20),
+                  onPressed: _selectCustomer,
+                ),
+                if (_selectedCustomer != null)
+                  Expanded(
+                    child: Chip(
+                      avatar: const Icon(Icons.person, size: 16),
+                      label: Text(
+                        _selectedCustomer!.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      deleteIcon: const Icon(Icons.close, size: 16),
+                      onDeleted: () {
+                        setState(() => _selectedCustomer = null);
+                        context.read<CartProvider>().setCustomer(null, null);
+                      },
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: Text(
+                      S.t(context, 'Walk-in (tanpa pelanggan)'),
+                      style: theme.textTheme.bodySmall?.copyWith(fontSize: 12),
+                    ),
+                  ),
+                FilterChip(
+                  label: Text(
+                    S.t(context, 'Cicilan/Kasbon'),
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  selected: _isInstallment,
+                  onSelected: (v) => setState(() => _isInstallment = v),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            if (_isInstallment)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _installmentPeriod,
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Periode',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.sm,
+                          ),
+                        ),
+                        style: const TextStyle(fontSize: 12),
+                        items: [
+                          DropdownMenuItem(
+                            value: 'weekly',
+                            child: Text(
+                              S.t(context, 'Mingguan'),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'biweekly',
+                            child: Text(
+                              S.t(context, '2 Minggu'),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: 'monthly',
+                            child: Text(
+                              S.t(context, 'Bulanan'),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _installmentPeriod = v ?? 'monthly'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Jumlah',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.sm,
+                          ),
+                        ),
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(fontSize: 12),
+                        onChanged: (v) => _installmentCount =
+                            int.tryParse(v)?.clamp(1, 60) ?? 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_queueNumber.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Text(
+                      '${S.t(context, 'Antrian')}: $_queueNumber',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScannerPanel(BuildContext context) {
+    return Container(
+      height: 220,
+      color: Colors.black,
+      child: Stack(
+        children: [
+          MobileScanner(
+            onDetect: (capture) {
+              final barcodes = capture.barcodes;
+              if (barcodes.isEmpty) return;
+              final barcode = barcodes.first.rawValue;
+              if (barcode != null && barcode.isNotEmpty) _scanBarcode(barcode);
             },
+            errorBuilder: (context, error) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Text(
+                  'Kamera tidak dapat dibuka. Periksa izin kamera di pengaturan Android.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white),
+                ),
+              ),
+            ),
+            placeholderBuilder: (context) => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          ),
+          Positioned(
+            top: AppSpacing.sm,
+            right: AppSpacing.sm,
+            child: IconButton.filledTonal(
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: () => setState(() => _isScanning = false),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: AppSpacing.sm,
+            child: Text(
+              S.t(context, 'Arahkan kamera ke barcode produk'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProductArea() {
+    if (_isLoadingProducts && _products.isEmpty) {
+      return const LoadingSkeleton(items: 6, itemHeight: 72);
+    }
+    if (_productError != null && _products.isEmpty) {
+      return ErrorState(
+        message: _productError!,
+        icon: Icons.inventory_2_outlined,
+        onRetry: () => _loadProducts(),
+      );
+    }
+    if (_products.isEmpty) {
+      return EmptyState(
+        icon: Icons.search_off,
+        title: S.t(context, 'Tidak ada produk'),
+        message: S.t(
+          context,
+          'Coba kata kunci lain atau ubah filter kategori.',
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        if (_flatCategories.isNotEmpty)
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs,
+              ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: ChoiceChip(
+                    label: Text(S.t(context, 'Semua')),
+                    selected: _categoryId == null,
+                    onSelected: (_) {
+                      setState(() => _categoryId = null);
+                      _loadProducts();
+                    },
+                  ),
+                ),
+                for (final category in _flatCategories)
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.sm),
+                    child: ChoiceChip(
+                      label: Text(category.name),
+                      selected: _categoryId == category.id,
+                      onSelected: (_) {
+                        setState(
+                          () => _categoryId = _categoryId == category.id
+                              ? null
+                              : category.id,
+                        );
+                        _loadProducts();
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => _loadProducts(),
+            child: GridView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 150,
+                mainAxisExtent: 158,
+                crossAxisSpacing: AppSpacing.sm,
+                mainAxisSpacing: AppSpacing.sm,
+              ),
+              itemCount: _products.length,
+              itemBuilder: (_, i) => ProductCard(
+                product: _products[i],
+                onTap: () => _addToCart(_products[i]),
+              ),
+            ),
           ),
         ),
       ],
     );
   }
 
+  /// Panel keranjang untuk layar lebar (tablet).
+  Widget _buildCartPanel(BuildContext context, {required bool wide}) {
+    final theme = Theme.of(context);
+    final cart = context.watch<CartProvider>();
+    return Container(
+      width: 340,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(left: BorderSide(color: theme.dividerColor)),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${S.t(context, 'Keranjang')} (${cart.itemCount})',
+                    style: theme.textTheme.titleSmall?.copyWith(fontSize: 14),
+                  ),
+                ),
+                if (cart.items.isNotEmpty)
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await confirmClearCart(context);
+                      if (ok) cart.clear();
+                    },
+                    child: Text(
+                      S.t(context, 'Kosongkan'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: cart.items.isEmpty
+                ? EmptyState(
+                    icon: Icons.shopping_cart_outlined,
+                    title: S.t(context, 'Keranjang kosong'),
+                    message: S.t(
+                      context,
+                      'Ketuk produk untuk menambahkan ke keranjang.',
+                    ),
+                  )
+                : _cartList(cart),
+          ),
+          _cartTotals(context, cart),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: FilledButton(
+                onPressed: cart.items.isEmpty || _isProcessing
+                    ? null
+                    : _checkout,
+                child: _isProcessing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Text(
+                        '${S.t(context, 'Bayar')} · ${Fmt.rupiah(cart.totalAmount)}',
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cartList(CartProvider cart) {
+    final items = cart.items;
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+      itemCount: items.length,
+      itemBuilder: (_, i) => CartItemTile(
+        item: items[i],
+        index: i,
+        onQuantityChanged: (idx, qty) => cart.updateQuantity(idx, qty),
+        onDiscountChanged: (idx, pct) => cart.updateDiscount(idx, pct),
+        onRemove: () => cart.removeItem(i),
+      ),
+    );
+  }
+
+  Widget _cartTotals(BuildContext context, CartProvider cart) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: theme.dividerColor)),
+      ),
+      child: Column(
+        children: [
+          _totalRow(context, S.t(context, 'Subtotal'), cart.subtotal),
+          if (cart.totalDiscountAmount > 0)
+            _totalRow(
+              context,
+              S.t(context, 'Diskon'),
+              -cart.totalDiscountAmount,
+              color: AppColors.error,
+            ),
+          if (cart.taxAmount > 0)
+            _totalRow(context, S.t(context, 'Pajak'), cart.taxAmount),
+          _totalRow(
+            context,
+            S.t(context, 'Total'),
+            cart.totalAmount,
+            emphasize: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _totalRow(
+    BuildContext context,
+    String label,
+    double amount, {
+    bool emphasize = false,
+    Color? color,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: emphasize
+                  ? theme.textTheme.titleSmall?.copyWith(fontSize: 14)
+                  : theme.textTheme.bodySmall?.copyWith(fontSize: 12.5),
+            ),
+          ),
+          Text(
+            Fmt.rupiah(amount),
+            style: TextStyle(
+              fontWeight: emphasize ? FontWeight.w800 : FontWeight.w600,
+              fontSize: emphasize ? 15 : 12.5,
+              color: color ?? (emphasize ? theme.colorScheme.primary : null),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Bar checkout layar kecil: selalu terlihat selama keranjang terisi.
+  Widget _buildCheckoutBar(BuildContext context) {
+    final cart = context.watch<CartProvider>();
+    final theme = Theme.of(context);
+    if (cart.items.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(top: BorderSide(color: theme.dividerColor)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${cart.totalQuantity} ${S.t(context, 'item')}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 11.5,
+                      ),
+                    ),
+                    Text(
+                      Fmt.rupiah(cart.totalAmount),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _openCartSheet(),
+                icon: const Icon(Icons.shopping_cart_outlined, size: 18),
+                label: Text('${cart.itemCount}'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              FilledButton(
+                onPressed: _isProcessing ? null : _checkout,
+                child: _isProcessing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Text(S.t(context, 'Bayar')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCartSheet() async {
+    final shouldCheckout = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        return Consumer<CartProvider>(
+          builder: (context, cart, _) {
+            final maxHeight = MediaQuery.sizeOf(context).height * 0.75;
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${S.t(context, 'Keranjang')} (${cart.itemCount})',
+                            style: Theme.of(
+                              context,
+                            ).textTheme.titleMedium?.copyWith(fontSize: 16),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            final ok = await confirmClearCart(context);
+                            if (ok) cart.clear();
+                          },
+                          child: Text(
+                            S.t(context, 'Kosongkan'),
+                            style: const TextStyle(fontSize: 12.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(child: _cartList(cart)),
+                  _cartTotals(context, cart),
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: FilledButton(
+                        onPressed: cart.items.isEmpty
+                            ? null
+                            : () => Navigator.pop(sheetContext, true),
+                        child: Text(
+                          '${S.t(context, 'Bayar')} · ${Fmt.rupiah(cart.totalAmount)}',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (shouldCheckout == true && mounted) {
+      await _checkout();
+    }
+  }
+
+  Future<bool> confirmClearCart(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.t(ctx, 'Kosongkan keranjang?')),
+        content: Text(S.t(ctx, 'Semua item di keranjang akan dihapus.')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(S.t(ctx, 'Batal')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(S.t(ctx, 'Kosongkan')),
+          ),
+        ],
+      ),
+    ).then((value) => value ?? false);
+  }
 }
 
+class StatusChipOffline extends StatelessWidget {
+  const StatusChipOffline({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.warningSoft,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: const Text(
+        'OFFLINE',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFFB45309),
+        ),
+      ),
+    );
+  }
+}
+
+/// Dialog pencarian + tambah pelanggan cepat dari POS.
 class CustomerSearchDialog extends StatefulWidget {
   const CustomerSearchDialog({super.key});
 
@@ -780,86 +1638,158 @@ class CustomerSearchDialog extends StatefulWidget {
 class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
   final ApiService _api = ApiService();
   final TextEditingController _ctrl = TextEditingController();
-  List<Customer> _customers = [];
-  bool _loading = false;
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  List<Customer> _customers = [];
+  bool _loading = false;
+  String? _error;
   bool _showAddForm = false;
+  Timer? _debounce;
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _ctrl.dispose();
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     super.dispose();
   }
 
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      _search(value.trim());
+    });
+  }
+
   Future<void> _search(String q) async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final response = await _api.get('/customers?search=$q');
-      final data = response['data'] ?? response;
-      setState(() => _customers = (data as List).map((j) => Customer.fromJson(j)).toList());
-    } catch (_) {}
-    setState(() => _loading = false);
+      final response = await _api.get(
+        '/customers',
+        query: {'search': q.isEmpty ? null : q, 'per_page': '50'},
+      );
+      final dynamic data = response is Map
+          ? (response['data'] ?? response)
+          : response;
+      if (!mounted) return;
+      setState(() {
+        _customers = data is List
+            ? data
+                  .whereType<Map<String, dynamic>>()
+                  .map(Customer.fromJson)
+                  .toList()
+            : [];
+      });
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Gagal mencari pelanggan. Coba lagi.');
+      }
+    }
+    if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _addCustomer() async {
-    if (_nameCtrl.text.trim().isEmpty) return;
-    final en = context.read<LangProvider>().isEnglish;
-    setState(() => _loading = true);
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      if (mounted) {
+        setState(() => _error = 'Nama pelanggan wajib diisi.');
+      }
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final response = await _api.post('/customers', body: {
-        'name': _nameCtrl.text.trim(),
-        'phone': _phoneCtrl.text.trim(),
-      });
-      final data = response['data'] ?? response;
+      final response = await _api.post(
+        '/customers',
+        body: {'name': name, 'phone': _phoneCtrl.text.trim()},
+      );
+      final dynamic data = response is Map
+          ? (response['data'] ?? response)
+          : response;
+      if (data is! Map<String, dynamic>) {
+        throw const FormatException('respons tidak dikenali');
+      }
       final customer = Customer.fromJson(data);
       if (mounted) Navigator.of(context).pop(customer);
-    } catch (e) {
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${S.e(en, 'Gagal')}: $e'), backgroundColor: Colors.red),
-        );
+        setState(() => _error = 'Gagal menyimpan pelanggan. Coba lagi.');
       }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    setState(() => _loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.all(AppSpacing.lg),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                Text(S.t(context, 'Pilih Customer'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                const Spacer(),
+                Expanded(
+                  child: Text(
+                    S.t(context, 'Pilih Customer'),
+                    style: theme.textTheme.titleMedium?.copyWith(fontSize: 17),
+                  ),
+                ),
                 TextButton(
                   onPressed: () => setState(() => _showAddForm = !_showAddForm),
-                  child: Text(_showAddForm ? S.t(context, 'Batal') : S.t(context, '+ Baru')),
+                  child: Text(
+                    _showAddForm
+                        ? S.t(context, 'Batal')
+                        : S.t(context, '+ Baru'),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.errorSoft,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: Text(_error!, style: const TextStyle(fontSize: 12)),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.sm),
             if (_showAddForm) ...[
               TextField(
                 controller: _nameCtrl,
-                decoration: InputDecoration(labelText: S.t(context, 'Nama'), border: const OutlineInputBorder(), isDense: true),
+                decoration: InputDecoration(
+                  labelText: S.t(context, 'Nama'),
+                  isDense: true,
+                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               TextField(
                 controller: _phoneCtrl,
-                decoration: InputDecoration(labelText: S.t(context, 'Telepon'), border: const OutlineInputBorder(), isDense: true),
+                decoration: InputDecoration(
+                  labelText: S.t(context, 'Telepon'),
+                  isDense: true,
+                ),
                 keyboardType: TextInputType.phone,
               ),
-              const SizedBox(height: 8),
-              ElevatedButton(
+              const SizedBox(height: AppSpacing.md),
+              FilledButton(
                 onPressed: _loading ? null : _addCustomer,
                 child: Text(S.t(context, 'Simpan Customer')),
               ),
@@ -868,40 +1798,62 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
                 controller: _ctrl,
                 decoration: InputDecoration(
                   hintText: S.t(context, 'Cari nama atau telepon...'),
-                  prefixIcon: const Icon(Icons.search),
-                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.search, size: 20),
                   isDense: true,
                 ),
-                onChanged: _search,
+                onChanged: _onQueryChanged,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               SizedBox(
-                height: 250,
+                height: 260,
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
                     : _customers.isEmpty
-                        ? Center(child: Text(S.t(context, 'Tidak ada customer'), style: const TextStyle(color: Colors.grey)))
-                        : ListView.builder(
-                            itemCount: _customers.length,
-                            itemBuilder: (_, i) {
-                              final c = _customers[i];
-                              return ListTile(
-                                leading: CircleAvatar(
-                                    child: Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : '?')),
-                                title: Text(c.name.isNotEmpty ? c.name : '(tanpa nama)',
-                                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                                subtitle: Text(c.phone ?? '-'),
-                                trailing: c.totalPoints != null
-                                    ? Chip(label: Text('${c.totalPoints} pts', style: const TextStyle(fontSize: 10)))
-                                    : null,
-                                onTap: () => Navigator.of(context).pop(c),
-                              );
-                            },
-                          ),
+                    ? EmptyState(
+                        icon: Icons.people_outline,
+                        title: S.t(context, 'Tidak ada customer'),
+                        message: S.t(
+                          context,
+                          'Tambahkan pelanggan baru dengan tombol + Baru.',
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _customers.length,
+                        itemBuilder: (_, i) {
+                          final c = _customers[i];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              child: Text(
+                                c.name.isNotEmpty
+                                    ? c.name[0].toUpperCase()
+                                    : '?',
+                              ),
+                            ),
+                            title: Text(
+                              c.name.isNotEmpty
+                                  ? c.name
+                                  : S.t(context, '(tanpa nama)'),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: Text(c.phone ?? '-'),
+                            trailing: c.totalPoints != null
+                                ? Text(
+                                    '${c.totalPoints} pts',
+                                    style: const TextStyle(fontSize: 11.5),
+                                  )
+                                : null,
+                            onTap: () => Navigator.of(context).pop(c),
+                          );
+                        },
+                      ),
               ),
             ],
             TextButton(
-                onPressed: () => Navigator.pop(context), child: Text(S.t(context, 'Skip / Walk-in'))),
+              onPressed: () => Navigator.pop(context),
+              child: Text(S.t(context, 'Skip / Walk-in')),
+            ),
           ],
         ),
       ),
