@@ -7,6 +7,7 @@
 - Toolchain: Flutter 3.41.6 / Dart 3.11.4
 - Baseline pra-perubahan: `flutter analyze` bersih, `flutter test` 18/18 pass
 - Hasil akhir: `dart format` OK · `flutter analyze` **0 issue** · `flutter test` **53/53 pass** · `flutter build apk --release` **sukses**
+- Commit sesi ini: `26321a6` (feat UI/UX + test), `540d86c` (branding Android), `7508f57` (docs) — sudah di-push ke `origin/main`
 
 ## 1. Metode
 
@@ -182,7 +183,8 @@ Catatan: `flutter_launcher_icons` **tidak dipakai** — versi yang kompatibel de
 | `dart format lib test` | ✅ dijalankan (62 file; seluruh file baru diformat) |
 | `flutter analyze` | ✅ **No issues found** |
 | `flutter test` | ✅ **53/53 pass** (18 test lama tetap hijau + 35 test baru) |
-| `flutter build apk --release` | ✅ `build\app\outputs\flutter-apk\app-release.apk` (71,9 MB, fat APK semua ABI; untuk distribusi gunakan `--split-per-abi`) |
+| `flutter build apk --release` | ✅ `build\app\outputs\flutter-apk\app-release.apk` (71,9 MB, fat APK semua ABI) |
+| `flutter build apk --release --split-per-abi` | ✅ `app-armeabi-v7a-release.apk` 22,9 MB · `app-arm64-v8a-release.apk` 26,5 MB · `app-x86_64-release.apk` 28,8 MB (rekomendasi distribusi) |
 
 ### 6.2 Cakupan test per file (11 file, 53 test)
 
@@ -270,8 +272,7 @@ Adaptive icon (background warna brand + layer depan logo, `mipmap-anydpi-v26`), 
 | Izin refund tidak ter-seed | Refund 403 untuk non-owner | Pesan server ditampilkan; fix disarankan |
 | Shift id lokal per perangkat | Ganti perangkat/hapus data → shift "yatim" | Petunjuk tutup dari admin web pada 422 |
 | Pelanggan baru tak tampil untuk kasir (scoping server) | Kasir bingung saat cari pelanggan baru | Dicatat; pelanggan tetap dibuat |
-| APK 71,9 MB (fat) | Unduhan besar | Gunakan `flutter build apk --split-per-abi` untuk distribusi |
-| Kontrol versi belum di-commit | Riwayat kerja sesi ini belum tersimpan di Git | Commit terpisah (fitur/test/doc) sebelum staging |
+| APK 71,9 MB (fat) | Unduhan besar | Gunakan `--split-per-abi` (22,9–28,8 MB per ABI) untuk distribusi |
 
 ### 8.6 Checklist verifikasi wajib di staging (belum bisa dilakukan di sesi ini — BLOCKED)
 
@@ -288,4 +289,4 @@ Adaptive icon (background warna brand + layer depan logo, `mipmap-anydpi-v26`), 
 
 ### 8.7 Status akhir
 
-**READY FOR STAGING** — kode terkompilasi bersih (analyze 0 issue), 53/53 test otomatis pass, APK release terbangun (bertanda tangan release key dari `android/key.properties`), dan tidak ada fitur palsu/tombol mati (fitur tanpa dukungan API dikecualikan secara eksplisit di §5). **NOT READY untuk produksi** sampai: (a) checklist §8.6 dieksekusi dengan backend & perangkat nyata, (b) perbaikan backend disepakati (deposit/slug refund), dan (c) perubahan sesi ini di-commit dan diverifikasi dari source yang ter-commit.
+**READY FOR STAGING** — kode terkompilasi bersih (analyze 0 issue), 53/53 test otomatis pass, APK release terbangun (bertanda tangan release key dari `android/key.properties`; tersedia varian per-ABI), dan tidak ada fitur palsu/tombol mati (fitur tanpa dukungan API dikecualikan secara eksplisit di §5). **NOT READY untuk produksi** sampai: (a) checklist §8.6 dieksekusi dengan backend & perangkat nyata, dan (b) perbaikan backend disepakati (deposit/slug refund).
