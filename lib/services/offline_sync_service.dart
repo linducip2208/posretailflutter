@@ -15,6 +15,40 @@ class OfflineSyncService {
 
   bool get isOnline => _isOnline;
 
+  /// Cache daftar metode pembayaran (global, tidak per outlet).
+  /// Dipakai PaymentDialog saat offline agar kasir tetap bisa checkout
+  /// dan transaksi masuk antrean kirim.
+  Future<void> cachePaymentMethods(List<Map<String, dynamic>> methods) async {
+    if (_db == null || methods.isEmpty) return;
+    final batch = _db!.batch();
+    batch.delete('payment_methods');
+    for (final m in methods) {
+      batch.insert('payment_methods', {
+        'id': _int(m['id']),
+        'name': m['name']?.toString(),
+        'code': m['code']?.toString(),
+        'type': m['type']?.toString(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getCachedPaymentMethods() async {
+    if (_db == null) return [];
+    final rows = await _db!.query('payment_methods', orderBy: 'id ASC');
+    return rows
+        .map(
+          (r) => {
+            'id': r['id'],
+            'name': r['name'],
+            'code': r['code'],
+            'type': r['type'],
+          },
+        )
+        .toList();
+  }
+
   void addListener(void Function(bool) callback) {
     _listeners.add(callback);
   }
@@ -34,7 +68,7 @@ class OfflineSyncService {
     _db = await databaseFactory.openDatabase(
       dbPath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onCreate: (db, version) async {
           await db.execute('''
         CREATE TABLE products (
@@ -63,6 +97,7 @@ class OfflineSyncService {
             'CREATE INDEX IF NOT EXISTS idx_products_outlet ON products(outlet_id)',
           );
           await _createOrdersTable(db);
+          await _createPaymentMethodsTable(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -73,6 +108,9 @@ class OfflineSyncService {
           }
           if (oldVersion < 4) {
             await _upgradeOrdersV4(db);
+          }
+          if (oldVersion < 5) {
+            await _createPaymentMethodsTable(db);
           }
         },
       ),
@@ -117,6 +155,18 @@ class OfflineSyncService {
   double _num(dynamic v) =>
       v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0;
   int _int(dynamic v) => v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
+
+  Future<void> _createPaymentMethodsTable(Database db) async {
+    // v5: cache metode pembayaran agar checkout offline tetap bisa
+    // memilih metode (payload antrean memakai id yang sama).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS payment_methods (
+        id INTEGER PRIMARY KEY,
+        name TEXT, code TEXT, type TEXT,
+        updated_at TEXT
+      )
+    ''');
+  }
 
   Future<void> _upgradeProductsV3(Database db) async {
     // v3: cache outlet-aware + tabel varian. Tanpa DELETE massal.

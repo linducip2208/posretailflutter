@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/s.dart';
 import '../models/payment_method.dart';
 import '../services/api_service.dart';
+import '../services/offline_sync_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatters.dart';
 
@@ -72,6 +75,7 @@ class PaymentDialog extends StatefulWidget {
 
 class _PaymentDialogState extends State<PaymentDialog> {
   final ApiService _api = ApiService();
+  final OfflineSyncService _offline = OfflineSyncService();
   final TextEditingController _amountCtrl = TextEditingController();
 
   List<PaymentMethod> _methods = [];
@@ -80,6 +84,10 @@ class _PaymentDialogState extends State<PaymentDialog> {
   bool _isLoadingMethods = true;
   String? _loadError;
   bool _submitting = false;
+
+  /// True bila daftar metode berasal dari cache lokal (perangkat offline).
+  /// Id metode sama dengan server sehingga payload antrean tetap valid.
+  bool _usingCachedMethods = false;
 
   @override
   void initState() {
@@ -99,16 +107,15 @@ class _PaymentDialogState extends State<PaymentDialog> {
       final dynamic data = response is Map
           ? (response['data'] ?? response)
           : response;
-      final list = data is List
-          ? data
-                .whereType<Map<String, dynamic>>()
-                .map(PaymentMethod.fromJson)
-                .toList()
-          : <PaymentMethod>[];
+      final raw = data is List
+          ? data.whereType<Map<String, dynamic>>().toList()
+          : <Map<String, dynamic>>[];
+      final list = raw.map(PaymentMethod.fromJson).toList();
 
       if (!mounted) return;
       setState(() {
         _methods = list;
+        _usingCachedMethods = false;
         if (list.isNotEmpty) {
           _entries
             ..clear()
@@ -119,6 +126,33 @@ class _PaymentDialogState extends State<PaymentDialog> {
           _loadError = S.tn(
             context,
             'Metode pembayaran belum diatur di server. Hubungi admin.',
+          );
+        }
+        _isLoadingMethods = false;
+      });
+      if (list.isNotEmpty) {
+        // Simpan untuk checkout offline berikutnya (fire-and-forget).
+        unawaited(_offline.cachePaymentMethods(raw));
+      }
+    } on ApiNetworkException catch (_) {
+      // Offline: pakai daftar metode tersimpan bila ada.
+      final cached = await _offline.getCachedPaymentMethods();
+      if (!mounted) return;
+      final cachedMethods = cached.map(PaymentMethod.fromJson).toList();
+      setState(() {
+        if (cachedMethods.isNotEmpty) {
+          _methods = cachedMethods;
+          _usingCachedMethods = true;
+          _entries
+            ..clear()
+            ..add(PaymentEntry(method: cachedMethods.first));
+          _activeIndex = 0;
+          _applyDefaultAmount();
+          _loadError = null;
+        } else {
+          _loadError = S.tn(
+            context,
+            'Tidak dapat terhubung ke server. Periksa jaringan Anda.',
           );
         }
         _isLoadingMethods = false;
@@ -408,6 +442,33 @@ class _PaymentDialogState extends State<PaymentDialog> {
                 }).toList(),
               ),
               const SizedBox(height: AppSpacing.lg),
+
+              if (_usingCachedMethods)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.cloud_off_outlined,
+                        size: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          S.t(
+                            context,
+                            'Mode offline — memakai daftar metode tersimpan.',
+                          ),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               TextField(
                 controller: _amountCtrl,

@@ -164,4 +164,27 @@ void main() {
 
     expect(calls, 1);
   });
+
+  test('cache metode pembayaran round-trip untuk checkout offline', () async {
+    expect(await offline.getCachedPaymentMethods(), isEmpty);
+
+    await offline.cachePaymentMethods([
+      {'id': 1, 'name': 'Tunai', 'code': 'cash', 'type': 'offline'},
+      {'id': 4, 'name': 'E-Wallet', 'code': 'ewallet', 'type': 'online'},
+    ]);
+
+    final cached = await offline.getCachedPaymentMethods();
+    expect(cached.length, 2);
+    expect(cached.first['id'], 1);
+    expect(cached.first['name'], 'Tunai');
+    expect(cached.last['code'], 'ewallet');
+
+    // Simpan ulang menimpa seluruh daftar (tanpa duplikat).
+    await offline.cachePaymentMethods([
+      {'id': 2, 'name': 'QRIS', 'code': 'qris', 'type': 'online'},
+    ]);
+    final replaced = await offline.getCachedPaymentMethods();
+    expect(replaced.length, 1);
+    expect(replaced.single['name'], 'QRIS');
+  });
 }

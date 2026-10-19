@@ -305,3 +305,30 @@ Adaptive icon (background warna brand + layer depan logo, `mipmap-anydpi-v26`), 
 ### 8.7 Status akhir
 
 **READY FOR STAGING** — kode terkompilasi bersih (analyze 0 issue), 53/53 test otomatis pass, APK release terbangun (bertanda tangan release key dari `android/key.properties`; tersedia varian per-ABI), uji asap emulator nyata (release APK: splash → login → jalur API produksi) lulus (§6.5), dan tidak ada fitur palsu/tombol mati (fitur tanpa dukungan API dikecualikan secara eksplisit di §5). **NOT READY untuk produksi** sampai: (a) checklist §8.6 dieksekusi dengan backend & perangkat nyata, dan (b) perbaikan backend disepakati (deposit/slug refund).
+
+## 9. Sesi refresh E2E lokal + audit penuh (19 Okt 2026, lanjutan)
+
+Infrastruktur uji: MySQL `pos_retail_e2e` terisolasi + `php artisan serve :8001` + proxy normalisasi `:8000` (sekuens + Content-Length + keep-alive + log lalu-lintas) + APK debug `--dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1`. Detail: `docs/audit/BASELINE.md`. Dokumen audit baru: `docs/audit/` (12 file: BASELINE, FEATURE_INVENTORY, API_CONTRACT, ARCHITECTURE, DEFECTS, FEATURE_SCORECARD, TEST_RESULTS, SECURITY_REVIEW, MANUAL_TEST_CHECKLIST, RELEASE_READINESS, CHANGELOG, KNOWN_LIMITATIONS).
+
+### 9.1 Temuan & perbaikan (di atas `59cc79c`)
+
+- **D16 (FIXED): checkout offline mustahil** — metode bayar hanya dari server sehingga tombol terkunci. Fix: tabel sqlite `payment_methods` (schema v5) + cache saat online + fallback saat `ApiNetworkException` + caption mode-offline + regression test. File: `offline_sync_service.dart`, `payment_dialog.dart`, `offline_sync_test.dart`.
+- **D17 (INFRA, teratasi + rekomendasi permanen): respons dev-server terpotong** — `php artisan serve` (`Connection: close` tanpa `Content-Length`) membuat body ±56 KB terpotong via NAT emulator, JSON gagal parse, `_handleResponse` diam-diam mengembalikan `{}`. Terbukti via probe + curl sejajar + proxy. Rekomendasi: body 2xx tak-terparse harus jadi `ApiNetworkException`, bukan `{}`.
+- **D18 (BACKEND, baru, kritis): deposit `use` → 500 + saldo terpotong tanpa jejak** — lolos validasi (`in:topup,use,refund`) lalu `INSERT` gagal (`enum('topup','deduct','refund')`, tanpa transaksi DB): saldo 50000→38000 tanpa baris mutasi. Butuh migrasi enum + transaksi di repo Laravel. Flutter benar.
+- **D19 (TERJAWAB): anomali 401** — request tanpa auth terbukti berasal dari curl diagnosis sendiri, bukan app. Hardening `await token` di get/post di-revert (menggantung widget test; invariant restore/login sudah menjamin `_token` terisi).
+- **D20 (INFRA): emulator kehabisan RAM** (lowmemorykiller) — bukan crash app.
+- **O1 (FIXED): badge stok basi pasca-checkout** — `unawaited(_loadProducts())` setelah order sukses (`pos_screen.dart`).
+- **O3 splash: bukan defect** — splash Flutter lengkap; yang tertangkap kamera hanya fase native.
+- Koreksi §8.4: slug refund TERJAWAB — izin server `hapus-transaksi` valid; refund owner sukses E2E (`POST refund → 201`).
+
+### 9.2 Hasil E2E (semua PASS kecuali tercatat)
+
+Login ke outlet ke dashboard · POS 50 produk · checkout tunai (**order 501**, stok 120→119) · riwayat+detail · refund (**RT-20261019-0001**, stok→120) · shift open→close (**13**, selisih 12000) · pelanggan **201** + topup 50rb · offline ke antrean ke auto-sync idempoten (**order 502**, 2x sync-batch menjadi 1 order) · laporan (omzet 1.726.681) · token dihapus→401→login rapi. Gagal: deposit `use` (D18 backend). Blocked: cetak fisik (tanpa perangkat).
+
+### 9.3 Checklist §8.6 — status kini
+
+Butir 1–7, 9: **PASS** (E2E lokal). Butir 5 non-owner: NOT TESTED. Butir 8, 10 (API<12): BLOCKED/NOT VERIFIED (perangkat fisik). Skor jujur per fitur: `FEATURE_SCORECARD.md` (rata-rata ≈90; tertinggi antrean offline 99; terendah cetak 67).
+
+### 9.4 Status akhir (menggantikan §8.7)
+
+**CONDITIONAL GO staging** — hijau: format, analyze 0 issue, **54/54 test**, E2E di atas, tanpa tombol mati. **NOT READY produksi** sampai: fix backend D18 (+B1–B15), cetak/scan fisik teruji, checklist manual §8.6 sisa dieksekusi.

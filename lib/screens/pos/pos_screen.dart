@@ -548,6 +548,9 @@ class _PosScreenState extends State<PosScreen> {
           }),
           SnackType.success,
         );
+        // Stok server berkurang — segarkan badge stok di background
+        // (tidak ditunggu agar struk langsung tampil).
+        unawaited(_loadProducts());
         await _showReceiptSheet(order);
       } else {
         _showSnack(
