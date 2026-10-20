@@ -6,7 +6,7 @@
 |----------|-------|
 | `dart format lib test` | 0 changed |
 | `flutter analyze` | 0 issue |
-| `flutter test` | **54/54 pass** (11 file: cart, cart_variant, formatters, models, order_parse, api_service_query, offline_sync, report_provider, payment_dialog, login, widget) |
+| `flutter test` | **55/55 pass** (12 file: +`order_detail_refund_test`: aksi refund + sheet item) |
 | `flutter build apk --debug` (+dart-define lokal) | sukses, terpasang emulator |
 | `flutter build apk --release` | sukses (baseline; rebuild final sebelum push) |
 
@@ -27,6 +27,9 @@ idempotensi duplicate; 401 debounce; backoff tanpa penalti jaringan.
 | Checkout offline → antrean → auto-sync idempoten | PASS | pending badge 1 → `sync-batch 200` ×2 → order **502** tunggal, stok→119 |
 | Laporan (termasuk order sync) | PASS | omzet 1.726.681; metode ter-mapping |
 | Token dihapus → 401 → login | PASS | `/user 401` → logout → LoginScreen |
+| Refund sebagai kasir → 403 tanpa efek | PASS | `POST refund → 403` "Butuh izin hapus-transaksi"; returns tetap 6, stok 119 |
+| Laporan 7 Hari + Bulan Ini | PASS | 7hr: 34/10.664.451 (rekonsiliasi: −2 order tgl 13 di luar jendela); bulan: 109/28.940.347 persis |
+| Skew jam perangkat (20 Okt UTC vs order 19 Okt WIB) | CATATAN | "Hari Ini" kosong di emulator; filter 7/30 hari benar; aturan zona Asia/Jakarta untuk produksi |
 | Deposit `use` | **FAIL (server)** | `500 Data truncated type`; saldo −12rb tanpa jejak (D18) |
 | Cetak fisik Bluetooth | BLOCKED | tanpa perangkat (PDF/share teruji UI) |
 | Scan barcode kamera | NOT VERIFIED | endpoint ada; tanpa label uji fisik |
