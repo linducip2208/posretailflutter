@@ -16,9 +16,20 @@ laporan per periode. Terhubung ke backend Laravel lewat **API v1**.
 - Offline-first: order antre di SQLite (`pos_offline.db`), terkirim via
   `POST /orders/sync-batch` saat online; badge "menunggu kirim" + retry
 - Struk: PDF (58/80mm), share, print Bluetooth thermal
-- Laporan: hari ini / kemarin / minggu ini / bulan ini (API nyata)
+- Laporan: penjualan / pembelian / inventori per periode (API nyata)
 - Customer: cari, tambah, pilih + poin/loyalty
-- Bahasa Indonesia / English (toggle di Pengaturan)
+- Pembelian: supplier (CRUD) + purchase order (buat, ship/receive/cancel)
+- Inventori: stock opname (sesi + approval), transfer antar outlet,
+  mutasi/audit trail, bahan baku + resep
+- Penjualan: retur (approve/reject), tahan transaksi (hold/resume),
+  cicilan & DP (jadwal + bayar)
+- Loyalitas & promo: reward (redeem + cek saldo), template diskon,
+  grup pelanggan
+- Sistem: pengguna & peran (CRUD + matriks akses), absensi (clock in/out)
+- Menu "Lainnya" digating按 peran (kasir/gudang/manager/admin/owner,
+  fail-open bila peran tak dikenal; server tetap menegakkan 403)
+- Bahasa Indonesia / English (toggle di Pengaturan, 733 kunci, ada test cakupan)
+- Branding: splash gradien biru, login + AppBar biru sesuai paket desain
 
 ## Requirements
 
@@ -54,9 +65,16 @@ lib/
     printer_service.dart   # struk PDF + Bluetooth
   screens/
     auth/ pos/ orders/ customers/ reports/ settings/ outlet/
+    suppliers/ purchases/ inventory/ sales/ loyalty/ system/
   l10n/                    # Indonesia (kunci) + English
-  utils/safe_parse.dart
+  utils/safe_parse.dart + utils/menu_access.dart (gating menu按peran)
 ```
+
+> Modul server-baru (supplier, PO, opname, transfer, retur, dsb.)
+> memanggil endpoint `api/v1` yang belum ada di backend — layarnya
+> menampilkan pesan jujur + retry sampai backend live. Snippet Laravel
+> siap-tempel per grup ada di `docs/BACKEND_*_SNIPPET.md`; kontrak di
+> `docs/API_CONTRACT_MOBILE_PARITY.md`.
 
 ## Alur penting
 
