@@ -11,7 +11,7 @@ void main() {
 
     expect(find.byType(Image), findsOneWidget);
 
-    expect(find.text('POS Retail'), findsOneWidget);
+    expect(find.text('POSRetail'), findsOneWidget);
 
     expect(find.text('Mudah • Cepat • Terpercaya'), findsOneWidget);
 

@@ -17,12 +17,12 @@ Widget _wrap(Widget child) {
 
 void main() {
   group('Login screen', () {
-    testWidgets('menampilkan form email, password, tombol masuk', (
+    testWidgets('menampilkan form email, password, tombol login', (
       tester,
     ) async {
       await tester.pumpWidget(_wrap(const LoginScreen()));
       await tester.pump();
-      expect(find.text('Masuk'), findsWidgets);
+      expect(find.text('Login'), findsWidgets);
       expect(find.byType(TextField), findsNWidgets(2));
       expect(find.byType(ElevatedButton), findsOneWidget);
     });
@@ -35,6 +35,16 @@ void main() {
       await tester.tap(find.byIcon(Icons.visibility_off));
       await tester.pump();
       expect(find.byIcon(Icons.visibility), findsOneWidget);
+    });
+    testWidgets('lupa password menampilkan arahan hubungi admin', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_wrap(const LoginScreen()));
+      await tester.pump();
+      expect(find.text('Lupa password?'), findsOneWidget);
+      await tester.tap(find.text('Lupa password?'));
+      await tester.pump();
+      expect(find.textContaining('Hubungi admin'), findsWidgets);
     });
   });
 }

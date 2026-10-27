@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../l10n/s.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/common/app_snackbar.dart';
 import '../outlet/outlet_selection_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -24,6 +25,17 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
+  }
+
+  void _forgotPassword() {
+    showAppSnackbar(
+      context,
+      S.tn(
+        context,
+        'Reset password mandiri belum tersedia. Hubungi admin untuk bantuan.',
+      ),
+      type: SnackType.warning,
+    );
   }
 
   Future<void> _login() async {
@@ -66,29 +78,39 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(AppRadius.lg),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Image.asset(
-                      'assets/app_icon.png',
-                      width: 56,
-                      height: 56,
+                  Image.asset(
+                    'assets/app_icon.png',
+                    width: 72,
+                    height: 72,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text.rich(
+                    TextSpan(
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                      ),
+                      children: [
+                        TextSpan(
+                          text: 'POS',
+                          style: TextStyle(color: AppColors.text),
+                        ),
+                        TextSpan(
+                          text: 'Retail',
+                          style: TextStyle(color: AppColors.primary),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.md),
                   Text(
-                    S.t(context, 'POS Retail'),
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontSize: 24,
-                    ),
+                    S.t(context, 'Selamat Datang'),
+                    style: theme.textTheme.titleLarge?.copyWith(fontSize: 19),
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    S.t(context, 'Masuk untuk mulai bertransaksi'),
+                    S.t(context, 'Masuk untuk melanjutkan'),
                     style: theme.textTheme.bodySmall?.copyWith(fontSize: 13),
                   ),
                   const SizedBox(height: AppSpacing.xl),
@@ -137,9 +159,16 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             )
                           : Text(
-                              S.t(context, 'Masuk'),
+                              S.t(context, 'Login'),
                               style: const TextStyle(fontSize: 16),
                             ),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _forgotPassword,
+                      child: Text(S.t(context, 'Lupa password?')),
                     ),
                   ),
                   if (error != null) ...[
@@ -178,10 +207,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                   const SizedBox(height: AppSpacing.xl),
                   Text(
-                    S.t(
-                      context,
-                      'Hubungi admin bila akun atau password Anda bermasalah.',
-                    ),
+                    S.t(context, 'Belum punya akun? Hubungi admin'),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(fontSize: 11.5),
                   ),
