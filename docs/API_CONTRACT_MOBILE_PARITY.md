@@ -202,11 +202,12 @@ Export PDF/Excel tetap via web (mobile cukup tampil + share link file).
 
 1. Backend Laravel: daftarkan route `api/v1` per grup di atas dengan
    middleware `auth:sanctum` + `scope outlet` yang sama dengan endpoint lama.
-2. Setelah satu grup live (probe berubah 404 → 401/200),
-   `WebModuleScreen` di Flutter otomatis menampilkan status "Terhubung"
-   tanpa update aplikasi; implementasi penuh (filter/aksi/approval)
-   menyusul per layar.
-3. Setiap penambahan endpoint: tambahkan 1 widget test
+2. Setelah satu grup live (respons berubah 404 → 401/200),
+   layar native Flutter modul tersebut langsung berfungsi penuh
+   (daftar, buat, aksi workflow) tanpa update aplikasi;
+   sebelum itu layar menampilkan pesan jujur + tombol coba lagi.
+   Snippet siap-tempel per grup ada di `docs/BACKEND_*_SNIPPET.md`.
+3. Setiap penambahan endpoint: tambahkan/perbarui widget test
    (`test/*_test.dart`) mengikuti pola `payment_dialog_test.dart`.
 
 ## Checklist verifikasi per endpoint baru

@@ -6,6 +6,7 @@ import '../../l10n/s.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/offline_sync_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/menu_access.dart';
 import '../../widgets/common/confirmation_dialog.dart';
 import '../../widgets/common/status_badge.dart';
 import '../auth/login_screen.dart';
@@ -144,6 +145,13 @@ class _MoreScreenState extends State<MoreScreen> {
     final query = _searchCtrl.text.trim().toLowerCase();
 
     final sections = _buildSections(context);
+    final role = user?.role;
+    for (final section in sections) {
+      section.items.removeWhere(
+        (item) => !menuVisibleForRole(role, item.roles),
+      );
+    }
+    sections.removeWhere((s) => s.items.isEmpty);
     if (query.isNotEmpty) {
       for (final section in sections) {
         section.items.removeWhere(
@@ -350,6 +358,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Retur Penjualan'),
             subtitle: S.t(context, 'Pengembalian barang & approval'),
             onTap: () => _open(const ReturnListScreen()),
+            roles: salesRoles,
           ),
           _MenuEntry(
             icon: Icons.pause_circle_outline,
@@ -357,6 +366,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Tahan Transaksi'),
             subtitle: S.t(context, 'Hold / suspend keranjang sementara'),
             onTap: () => _open(const HeldOrderScreen()),
+            roles: salesRoles,
           ),
           _MenuEntry(
             icon: Icons.payments_outlined,
@@ -364,6 +374,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Cicilan & Uang Muka'),
             subtitle: S.t(context, 'Jadwal bayar & sisa pembayaran'),
             onTap: () => _open(const InstallmentScreen()),
+            roles: salesRoles,
           ),
         ],
       ),
@@ -376,6 +387,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Purchase Order'),
             subtitle: S.t(context, 'Draft → Dipesan → Diterima'),
             onTap: () => _open(const PurchaseOrderListScreen()),
+            roles: stockRoles,
           ),
           _MenuEntry(
             icon: Icons.local_shipping_outlined,
@@ -383,6 +395,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Supplier'),
             subtitle: S.t(context, 'Pemasok & riwayat pembelian'),
             onTap: () => _open(const SupplierListScreen()),
+            roles: stockRoles,
           ),
         ],
       ),
@@ -395,6 +408,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Stock Opname'),
             subtitle: S.t(context, 'Hitung fisik & approval selisih'),
             onTap: () => _open(const OpnameListScreen()),
+            roles: stockRoles,
           ),
           _MenuEntry(
             icon: Icons.swap_horiz,
@@ -402,6 +416,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Transfer Stok'),
             subtitle: S.t(context, 'Pindah stok antar outlet'),
             onTap: () => _open(const TransferListScreen()),
+            roles: stockRoles,
           ),
           _MenuEntry(
             icon: Icons.history,
@@ -409,6 +424,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Mutasi Stok'),
             subtitle: S.t(context, 'Audit trail pergerakan stok'),
             onTap: () => _open(const StockMovementScreen()),
+            roles: stockRoles,
           ),
           _MenuEntry(
             icon: Icons.kitchen_outlined,
@@ -416,6 +432,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Bahan Baku & Resep'),
             subtitle: S.t(context, 'Raw material & recipe items'),
             onTap: () => _open(const RawMaterialScreen()),
+            roles: stockRoles,
           ),
         ],
       ),
@@ -428,6 +445,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Poin & Reward'),
             subtitle: S.t(context, 'Poin otomatis & katalog reward'),
             onTap: () => _open(const RewardListScreen()),
+            roles: salesRoles,
           ),
           _MenuEntry(
             icon: Icons.discount_outlined,
@@ -435,6 +453,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Template Diskon'),
             subtitle: S.t(context, 'Persen, fixed, Buy X Get Y'),
             onTap: () => _open(const DiscountListScreen()),
+            roles: salesRoles,
           ),
           _MenuEntry(
             icon: Icons.group_outlined,
@@ -442,6 +461,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Grup Pelanggan'),
             subtitle: S.t(context, 'Regular, Member, Reseller'),
             onTap: () => _open(const CustomerGroupScreen()),
+            roles: salesRoles,
           ),
         ],
       ),
@@ -454,6 +474,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Laporan Penjualan'),
             subtitle: S.t(context, 'Chart, top produk, export'),
             onTap: () => _open(const ReportScreen()),
+            roles: reportRoles,
           ),
           _MenuEntry(
             icon: Icons.shopping_bag_outlined,
@@ -461,6 +482,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Laporan Pembelian'),
             subtitle: S.t(context, 'PO, supplier, tren harga'),
             onTap: () => _open(const PurchaseReportScreen()),
+            roles: reportRoles,
           ),
           _MenuEntry(
             icon: Icons.inventory_2_outlined,
@@ -468,6 +490,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Laporan Inventori'),
             subtitle: S.t(context, 'Menipis, overstock, akurasi'),
             onTap: () => _open(const InventoryReportScreen()),
+            roles: reportRoles,
           ),
         ],
       ),
@@ -480,6 +503,7 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Pengguna & Peran'),
             subtitle: S.t(context, 'Owner, Admin, Kasir, Gudang'),
             onTap: () => _open(const UserListScreen()),
+            roles: userAdminRoles,
           ),
           _MenuEntry(
             icon: Icons.fingerprint_outlined,
@@ -559,6 +583,11 @@ class _MenuEntry {
   final String? subtitle;
   final int? badge;
   final VoidCallback onTap;
+
+  /// Peran yang boleh melihat menu ini (lowercase, sesuai knownRoles).
+  /// null = semua peran. Peran tak dikenal → tetap tampil (fail-open,
+  /// server menegakkan 403).
+  final List<String>? roles;
   _MenuEntry({
     required this.icon,
     required this.color,
@@ -566,5 +595,6 @@ class _MenuEntry {
     this.subtitle,
     this.badge,
     required this.onTap,
+    this.roles,
   });
 }
