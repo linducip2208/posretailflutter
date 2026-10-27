@@ -10,9 +10,12 @@ import '../../widgets/common/confirmation_dialog.dart';
 import '../../widgets/common/status_badge.dart';
 import '../auth/login_screen.dart';
 import '../customers/customer_list_screen.dart';
+import '../inventory/stock_movement_screen.dart';
 import '../outlet/outlet_selection_screen.dart';
+import '../purchases/purchase_order_list_screen.dart';
 import '../reports/report_screen.dart';
 import '../settings/settings_screen.dart';
+import '../suppliers/supplier_list_screen.dart';
 import 'about_screen.dart';
 import 'printer_screen.dart';
 import 'profile_screen.dart';
@@ -390,34 +393,14 @@ class _MoreScreenState extends State<MoreScreen> {
             color: AppColors.primary,
             label: S.t(context, 'Purchase Order'),
             subtitle: S.t(context, 'Draft → Dipesan → Diterima'),
-            onTap: () => _open(
-              WebModuleScreen(
-                title: S.tn(context, 'Purchase Order'),
-                description: S.tn(
-                  context,
-                  'Buat PO ke supplier. Stok otomatis bertambah saat PO diterima.',
-                ),
-                webPath: '/admin/purchase-orders',
-                apiEndpoints: const ['/purchase-orders', '/purchases'],
-              ),
-            ),
+            onTap: () => _open(const PurchaseOrderListScreen()),
           ),
           _MenuEntry(
             icon: Icons.local_shipping_outlined,
             color: AppColors.accent,
             label: S.t(context, 'Supplier'),
             subtitle: S.t(context, 'Pemasok & riwayat pembelian'),
-            onTap: () => _open(
-              WebModuleScreen(
-                title: S.tn(context, 'Supplier'),
-                description: S.tn(
-                  context,
-                  'Daftar pemasok lengkap dengan kontak, alamat, dan riwayat PO.',
-                ),
-                webPath: '/admin/suppliers',
-                apiEndpoints: const ['/suppliers'],
-              ),
-            ),
+            onTap: () => _open(const SupplierListScreen()),
           ),
         ],
       ),
@@ -463,17 +446,7 @@ class _MoreScreenState extends State<MoreScreen> {
             color: AppColors.textSecondary,
             label: S.t(context, 'Mutasi Stok'),
             subtitle: S.t(context, 'Audit trail pergerakan stok'),
-            onTap: () => _open(
-              WebModuleScreen(
-                title: S.tn(context, 'Mutasi Stok'),
-                description: S.tn(
-                  context,
-                  'Setiap pergerakan tercatat: penjualan, pembelian, transfer, opname, adjustment.',
-                ),
-                webPath: '/admin/stock-movements',
-                apiEndpoints: const ['/stock-movements', '/inventory/movements'],
-              ),
-            ),
+            onTap: () => _open(const StockMovementScreen()),
           ),
           _MenuEntry(
             icon: Icons.kitchen_outlined,
