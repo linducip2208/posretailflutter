@@ -11,6 +11,7 @@ import '../../widgets/common/status_badge.dart';
 import '../auth/login_screen.dart';
 import '../customers/customer_list_screen.dart';
 import '../outlet/outlet_selection_screen.dart';
+import '../reports/report_screen.dart';
 import '../settings/settings_screen.dart';
 import 'about_screen.dart';
 import 'printer_screen.dart';
@@ -18,6 +19,7 @@ import 'profile_screen.dart';
 import 'shift_screen.dart';
 import 'stock_alert_screen.dart';
 import 'sync_screen.dart';
+import 'web_module_screen.dart';
 
 /// Tab "Lainnya": pusat menu operasional, perangkat, akun, dan bantuan.
 class MoreScreen extends StatefulWidget {
@@ -321,6 +323,315 @@ class _MoreScreenState extends State<MoreScreen> {
             label: S.t(context, 'Shift Kasir'),
             subtitle: S.t(context, 'Buka/tutup shift & hitung kas'),
             onTap: () => _open(const ShiftScreen()),
+          ),
+        ],
+      ),
+      _MenuSection(
+        title: S.t(context, 'Penjualan'),
+        items: [
+          _MenuEntry(
+            icon: Icons.assignment_return_outlined,
+            color: AppColors.warning,
+            label: S.t(context, 'Retur Penjualan'),
+            subtitle: S.t(context, 'Pengembalian barang & approval'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Retur Penjualan'),
+                description: S.tn(
+                  context,
+                  'Proses retur customer/supplier dengan alasan dan approval. Stok otomatis kembali.',
+                ),
+                webPath: '/admin/orders',
+                apiEndpoints: const ['/returns', '/order-returns', '/sales-returns'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.pause_circle_outline,
+            color: AppColors.textSecondary,
+            label: S.t(context, 'Tahan Transaksi'),
+            subtitle: S.t(context, 'Hold / suspend keranjang sementara'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Tahan Transaksi'),
+                description: S.tn(
+                  context,
+                  'Simpan keranjang sementara dengan label, lanjutkan kapan saja. Auto-expire 24 jam.',
+                ),
+                webPath: '/admin/orders',
+                apiEndpoints: const ['/held-orders', '/orders/holds'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.payments_outlined,
+            color: AppColors.success,
+            label: S.t(context, 'Cicilan & Uang Muka'),
+            subtitle: S.t(context, 'Jadwal bayar & sisa pembayaran'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Cicilan & Uang Muka'),
+                description: S.tn(
+                  context,
+                  'Aktifkan cicilan mingguan/2-mingguan/bulanan dan uang muka (DP) per order.',
+                ),
+                webPath: '/admin/orders',
+                apiEndpoints: const ['/installments', '/down-payments'],
+              ),
+            ),
+          ),
+        ],
+      ),
+      _MenuSection(
+        title: S.t(context, 'Pembelian'),
+        items: [
+          _MenuEntry(
+            icon: Icons.shopping_cart_outlined,
+            color: AppColors.primary,
+            label: S.t(context, 'Purchase Order'),
+            subtitle: S.t(context, 'Draft → Dipesan → Diterima'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Purchase Order'),
+                description: S.tn(
+                  context,
+                  'Buat PO ke supplier. Stok otomatis bertambah saat PO diterima.',
+                ),
+                webPath: '/admin/purchase-orders',
+                apiEndpoints: const ['/purchase-orders', '/purchases'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.local_shipping_outlined,
+            color: AppColors.accent,
+            label: S.t(context, 'Supplier'),
+            subtitle: S.t(context, 'Pemasok & riwayat pembelian'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Supplier'),
+                description: S.tn(
+                  context,
+                  'Daftar pemasok lengkap dengan kontak, alamat, dan riwayat PO.',
+                ),
+                webPath: '/admin/suppliers',
+                apiEndpoints: const ['/suppliers'],
+              ),
+            ),
+          ),
+        ],
+      ),
+      _MenuSection(
+        title: S.t(context, 'Inventori'),
+        items: [
+          _MenuEntry(
+            icon: Icons.fact_check_outlined,
+            color: AppColors.primary,
+            label: S.t(context, 'Stock Opname'),
+            subtitle: S.t(context, 'Hitung fisik & approval selisih'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Stock Opname'),
+                description: S.tn(
+                  context,
+                  'Sesi opname per outlet, input fisik vs sistem, approval sebelum koreksi diterapkan.',
+                ),
+                webPath: '/admin/stock-opnames',
+                apiEndpoints: const ['/stock-opnames', '/opnames'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.swap_horiz,
+            color: AppColors.success,
+            label: S.t(context, 'Transfer Stok'),
+            subtitle: S.t(context, 'Pindah stok antar outlet'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Transfer Stok'),
+                description: S.tn(
+                  context,
+                  'Transfer antar outlet: Draft → Dikirim → Diterima, stok kedua sisi auto-update.',
+                ),
+                webPath: '/admin/stock-transfers',
+                apiEndpoints: const ['/stock-transfers', '/transfers'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.history,
+            color: AppColors.textSecondary,
+            label: S.t(context, 'Mutasi Stok'),
+            subtitle: S.t(context, 'Audit trail pergerakan stok'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Mutasi Stok'),
+                description: S.tn(
+                  context,
+                  'Setiap pergerakan tercatat: penjualan, pembelian, transfer, opname, adjustment.',
+                ),
+                webPath: '/admin/stock-movements',
+                apiEndpoints: const ['/stock-movements', '/inventory/movements'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.kitchen_outlined,
+            color: AppColors.warning,
+            label: S.t(context, 'Bahan Baku & Resep'),
+            subtitle: S.t(context, 'Raw material & recipe items'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Bahan Baku & Resep'),
+                description: S.tn(
+                  context,
+                  'Kelola bahan baku, stok minimum, dan komposisi resep per produk.',
+                ),
+                webPath: '/admin/raw-materials',
+                apiEndpoints: const ['/raw-materials', '/recipes'],
+              ),
+            ),
+          ),
+        ],
+      ),
+      _MenuSection(
+        title: S.t(context, 'Loyalitas & Promo'),
+        items: [
+          _MenuEntry(
+            icon: Icons.card_giftcard_outlined,
+            color: AppColors.accent,
+            label: S.t(context, 'Poin & Reward'),
+            subtitle: S.t(context, 'Poin otomatis & katalog reward'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Poin & Reward'),
+                description: S.tn(
+                  context,
+                  'Setiap transaksi menghasilkan poin. Tukarkan dengan reward, auto-upgrade grup pelanggan.',
+                ),
+                webPath: '/admin/loyalty-rewards',
+                apiEndpoints: const ['/loyalty-rewards', '/loyalty-points'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.discount_outlined,
+            color: AppColors.success,
+            label: S.t(context, 'Template Diskon'),
+            subtitle: S.t(context, 'Persen, fixed, Buy X Get Y'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Template Diskon'),
+                description: S.tn(
+                  context,
+                  'Buat template diskon dengan minimal belanja dan periode berlaku.',
+                ),
+                webPath: '/admin/discounts',
+                apiEndpoints: const ['/discounts', '/discount-templates'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.group_outlined,
+            color: AppColors.primary,
+            label: S.t(context, 'Grup Pelanggan'),
+            subtitle: S.t(context, 'Regular, Member, Reseller'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Grup Pelanggan'),
+                description: S.tn(
+                  context,
+                  'Grup dengan diskon otomatis dan auto-upgrade berdasarkan total belanja.',
+                ),
+                webPath: '/admin/customer-groups',
+                apiEndpoints: const ['/customer-groups'],
+              ),
+            ),
+          ),
+        ],
+      ),
+      _MenuSection(
+        title: S.t(context, 'Laporan'),
+        items: [
+          _MenuEntry(
+            icon: Icons.bar_chart_outlined,
+            color: AppColors.primary,
+            label: S.t(context, 'Laporan Penjualan'),
+            subtitle: S.t(context, 'Chart, top produk, export'),
+            onTap: () => _open(const ReportScreen()),
+          ),
+          _MenuEntry(
+            icon: Icons.shopping_bag_outlined,
+            color: AppColors.accent,
+            label: S.t(context, 'Laporan Pembelian'),
+            subtitle: S.t(context, 'PO, supplier, tren harga'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Laporan Pembelian'),
+                description: S.tn(
+                  context,
+                  'Total pembelian per periode, top supplier, PO outstanding.',
+                ),
+                webPath: '/admin/laporan-penjualan',
+                apiEndpoints: const ['/reports/purchases'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.inventory_2_outlined,
+            color: AppColors.warning,
+            label: S.t(context, 'Laporan Inventori'),
+            subtitle: S.t(context, 'Menipis, overstock, akurasi'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Laporan Inventori'),
+                description: S.tn(
+                  context,
+                  'Nilai inventori, akurasi opname, dan mutasi per periode.',
+                ),
+                webPath: '/admin/laporan-stok',
+                apiEndpoints: const ['/reports/inventory'],
+              ),
+            ),
+          ),
+        ],
+      ),
+      _MenuSection(
+        title: S.t(context, 'Sistem'),
+        items: [
+          _MenuEntry(
+            icon: Icons.manage_accounts_outlined,
+            color: AppColors.primary,
+            label: S.t(context, 'Pengguna & Peran'),
+            subtitle: S.t(context, 'Owner, Admin, Kasir, Gudang'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Pengguna & Peran'),
+                description: S.tn(
+                  context,
+                  'Kelola akun, role-based access, assign outlet, dan audit log.',
+                ),
+                webPath: '/admin/users',
+                apiEndpoints: const ['/users'],
+              ),
+            ),
+          ),
+          _MenuEntry(
+            icon: Icons.fingerprint_outlined,
+            color: AppColors.success,
+            label: S.t(context, 'Absensi'),
+            subtitle: S.t(context, 'Clock in/out pegawai'),
+            onTap: () => _open(
+              WebModuleScreen(
+                title: S.tn(context, 'Absensi'),
+                description: S.tn(
+                  context,
+                  'Pantau kehadiran, keterlambatan, izin, dan sakit.',
+                ),
+                webPath: '/admin/attendances',
+                apiEndpoints: const ['/attendances', '/absensi'],
+              ),
+            ),
           ),
         ],
       ),
