@@ -47,5 +47,8 @@ app.*.map.json
 # ECC
 /ECC-temp/
 
+# Aset desain lokal (di luar version control)
+/pos retail logo dan icon/
+
 # Gradle build output
 /android/build/
