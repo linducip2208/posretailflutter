@@ -105,16 +105,18 @@ abstract final class AppTheme {
       visualDensity: VisualDensity.standard,
       splashFactory: InkSparkle.splashFactory,
       appBarTheme: AppBarTheme(
-        backgroundColor: surfaceTint,
-        foregroundColor: isDark ? AppColors.darkText : AppColors.text,
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0.5,
         centerTitle: false,
         surfaceTintColor: Colors.transparent,
-        titleTextStyle: TextStyle(
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
+        titleTextStyle: const TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w700,
-          color: isDark ? AppColors.darkText : AppColors.text,
+          color: Colors.white,
         ),
       ),
       cardTheme: CardThemeData(

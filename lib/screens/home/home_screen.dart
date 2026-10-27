@@ -191,8 +191,9 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w500,
-                color: theme.colorScheme.onSurfaceVariant,
+                color: Colors.white.withValues(alpha: 0.85),
               ),
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
