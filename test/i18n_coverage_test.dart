@@ -164,8 +164,8 @@ void main() {
       'Daftar & pencarian pelanggan',
       'Daftar bahan kosong. Tambah bahan dulu lewat tombol Tambah Bahan.',
       'Dari tanggal',
-      'Data "\${h.label}" akan dihapus dan tidak bisa dikembalikan.',
-      'Data \$name akan dihapus dari server dan tidak bisa dikembalikan.',
+      'Data "{name}" akan dihapus dan tidak bisa dikembalikan.',
+      'Data {name} akan dihapus dari server dan tidak bisa dikembalikan.',
       'Data diperbarui saat server menerima transaksi baru. Restock dilakukan dari panel admin web.',
       'Data pembayaran tidak tersedia.',
       'Data tidak valid. Pastikan email belum digunakan pelanggan lain.',
@@ -730,6 +730,7 @@ void main() {
       'shift ini dibuka untuk outlet',
       'stok',
       'supplier',
+      'supplier ini',
       'terjual',
       'tersimpan di server.',
       'transaksi berhasil dikirim ke server.',
@@ -751,5 +752,13 @@ void main() {
     expect(s, contains('1'));
     expect(s, contains('2'));
     expect(s, isNot(contains('{d}')));
+  });
+
+  test('parameter {name} terisi di dialog hapus (EN)', () {
+    final s = S.e(true,
+        'Data {name} akan dihapus dari server dan tidak bisa dikembalikan.',
+        {'name': '"PT Maju"'});
+    expect(s, contains('"PT Maju"'));
+    expect(s, isNot(contains('{name}')));
   });
 }

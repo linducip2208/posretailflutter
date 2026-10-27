@@ -265,13 +265,17 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
   }
 
   Future<void> _delete(Supplier supplier) async {
-    final name = supplier.name.isEmpty ? 'supplier ini' : '"${supplier.name}"';
     final confirmed = await confirmDialog(
       context,
       title: S.tn(context, 'Hapus supplier?'),
       message: S.tn(
         context,
-        'Data $name akan dihapus dari server dan tidak bisa dikembalikan.',
+        'Data {name} akan dihapus dari server dan tidak bisa dikembalikan.',
+        {
+          'name': supplier.name.isEmpty
+              ? S.tn(context, 'supplier ini')
+              : '"${supplier.name}"',
+        },
       ),
       confirmLabel: S.tn(context, 'Hapus'),
       cancelLabel: S.tn(context, 'Batal'),

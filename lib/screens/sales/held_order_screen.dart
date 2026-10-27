@@ -210,7 +210,8 @@ class _HeldOrderScreenState extends State<HeldOrderScreen> {
       title: S.tn(context, 'Hapus transaksi hold?'),
       message: S.tn(
         context,
-        'Data "${h.label}" akan dihapus dan tidak bisa dikembalikan.',
+        'Data "{name}" akan dihapus dan tidak bisa dikembalikan.',
+        {'name': h.label},
       ),
       confirmLabel: S.tn(context, 'Hapus'),
       destructive: true,
