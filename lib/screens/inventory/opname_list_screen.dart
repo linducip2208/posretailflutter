@@ -29,7 +29,8 @@ class OpnameListScreen extends StatefulWidget {
 }
 
 class _OpnameListScreenState extends State<OpnameListScreen> {
-  static const _filters = ['semua', 'draft', 'counted', 'approved', 'cancelled'];
+  /// Status persis backend live: `pending` → `completed`.
+  static const _filters = ['semua', 'pending', 'completed'];
 
   final ApiService _api = ApiService();
   final ScrollController _scrollCtrl = ScrollController();
@@ -324,7 +325,11 @@ class _OpnameListScreenState extends State<OpnameListScreen> {
   }
 }
 
-/// Dialog buka sesi: POST /stock-opnames {outlet_id, note?}.
+/// Dialog buka sesi: POST /stock-opnames
+/// `{outlet_id, notes?, items: [{product_id, actual_stock}]}`.
+///
+/// Backend mewajibkan minimal 1 item, jadi dialog ini sekaligus
+/// mengumpulkan hitung fisik awal.
 class _OpnameCreateDialog extends StatefulWidget {
   final int outletId;
 
@@ -334,19 +339,102 @@ class _OpnameCreateDialog extends StatefulWidget {
   State<_OpnameCreateDialog> createState() => _OpnameCreateDialogState();
 }
 
+class _DraftOpnameItem {
+  final int productId;
+  final String productName;
+  final int actualStock;
+
+  _DraftOpnameItem({
+    required this.productId,
+    required this.productName,
+    required this.actualStock,
+  });
+}
+
 class _OpnameCreateDialogState extends State<_OpnameCreateDialog> {
   final ApiService _api = ApiService();
   final _noteCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+  List<Map<String, dynamic>> _foundProducts = [];
+  bool _searching = false;
+  final List<_DraftOpnameItem> _items = [];
   bool _submitting = false;
   String? _error;
 
   @override
   void dispose() {
     _noteCtrl.dispose();
+    _searchCtrl.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
+  void _onSearchChanged(String _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), _searchProducts);
+  }
+
+  Future<void> _searchProducts() async {
+    final q = _searchCtrl.text.trim();
+    if (q.isEmpty) {
+      setState(() => _foundProducts = []);
+      return;
+    }
+    setState(() => _searching = true);
+    try {
+      final response = await _api.get('/products', query: {'search': q});
+      final data = response is Map ? response['data'] : null;
+      if (!mounted) return;
+      setState(() {
+        _foundProducts = data is List
+            ? data.whereType<Map<String, dynamic>>().toList()
+            : [];
+        _searching = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _addProduct(Map<String, dynamic> raw) async {
+    final rawId = raw['id'];
+    final id = rawId is int
+        ? rawId
+        : rawId is num
+            ? rawId.toInt()
+            : int.tryParse(rawId?.toString() ?? '') ?? 0;
+    final name = raw['name']?.toString() ?? 'Produk #$id';
+    final qty = await showDialog<int>(
+      context: context,
+      builder: (_) => _ActualQtyDialog(productName: name),
+    );
+    if (qty == null || !mounted) return;
+    setState(() {
+      final existing = _items.indexWhere((e) => e.productId == id);
+      final item = _DraftOpnameItem(
+        productId: id,
+        productName: name,
+        actualStock: qty,
+      );
+      if (existing >= 0) {
+        _items[existing] = item;
+      } else {
+        _items.add(item);
+      }
+      _searchCtrl.clear();
+      _foundProducts = [];
+    });
+  }
+
   Future<void> _submit() async {
+    if (_items.isEmpty) {
+      setState(
+        () => _error = S.tn(context, 'Tambahkan minimal satu item hitung fisik.'),
+      );
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -356,7 +444,16 @@ class _OpnameCreateDialogState extends State<_OpnameCreateDialog> {
         '/stock-opnames',
         body: {
           'outlet_id': widget.outletId,
-          if (_noteCtrl.text.trim().isNotEmpty) 'note': _noteCtrl.text.trim(),
+          if (_noteCtrl.text.trim().isNotEmpty)
+            'notes': _noteCtrl.text.trim(),
+          'items': _items
+              .map(
+                (e) => {
+                  'product_id': e.productId,
+                  'actual_stock': e.actualStock,
+                },
+              )
+              .toList(),
         },
       );
       if (!mounted) return;
@@ -380,34 +477,108 @@ class _OpnameCreateDialogState extends State<_OpnameCreateDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(S.t(context, 'Buka Sesi Opname')),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_error != null) ...[
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              decoration: BoxDecoration(
-                color: AppColors.errorSoft,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_error != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: AppColors.errorSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: Text(_error!, style: const TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(height: AppSpacing.md),
+              ],
+              Text(
+                S.t(context, 'Sesi baru menyimpan stok sistem sebagai acuan dan hitung fisik awal.'),
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-              child: Text(_error!, style: const TextStyle(fontSize: 12)),
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
-          Text(
-            S.t(context, 'Sesi baru mencatat stok sistem saat ini sebagai acuan hitung fisik.'),
-            style: Theme.of(context).textTheme.bodySmall,
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  labelText: S.t(context, 'Cari produk'),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                ),
+                onChanged: _onSearchChanged,
+              ),
+              if (_searching)
+                const Padding(
+                  padding: EdgeInsets.all(AppSpacing.sm),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else
+                ..._foundProducts.map(
+                  (p) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      p['name']?.toString() ?? '-',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    trailing: const Icon(Icons.add, size: 20),
+                    onTap: () => _addProduct(p),
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.sm),
+              if (_items.isEmpty)
+                Text(
+                  S.t(context, 'Belum ada item. Cari produk di atas.'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              else
+                ..._items.map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            e.productName,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          '${S.t(context, 'Fisik')}: ${e.actualStock}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          onPressed: () => setState(() => _items.remove(e)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _noteCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  labelText: S.t(context, 'Catatan (opsional)'),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          TextField(
-            controller: _noteCtrl,
-            maxLines: 2,
-            decoration: InputDecoration(
-              labelText: S.t(context, 'Catatan (opsional)'),
-            ),
-          ),
-        ],
+        ),
       ),
       actions: [
         TextButton(
@@ -426,6 +597,53 @@ class _OpnameCreateDialogState extends State<_OpnameCreateDialog> {
                   ),
                 )
               : Text(S.t(context, 'Buka')),
+        ),
+      ],
+    );
+  }
+}
+
+/// Dialog stok fisik (integer, sesuai validasi backend `actual_stock`).
+class _ActualQtyDialog extends StatefulWidget {
+  final String productName;
+
+  const _ActualQtyDialog({required this.productName});
+
+  @override
+  State<_ActualQtyDialog> createState() => _ActualQtyDialogState();
+}
+
+class _ActualQtyDialogState extends State<_ActualQtyDialog> {
+  final _qtyCtrl = TextEditingController(text: '0');
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.productName, style: const TextStyle(fontSize: 15)),
+      content: TextField(
+        controller: _qtyCtrl,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: S.t(context, 'Stok fisik')),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(S.t(context, 'Batal')),
+        ),
+        FilledButton(
+          onPressed: () {
+            final qty = int.tryParse(_qtyCtrl.text.trim()) ?? -1;
+            if (qty < 0) return;
+            Navigator.pop(context, qty);
+          },
+          child: Text(S.t(context, 'Tambah')),
         ),
       ],
     );

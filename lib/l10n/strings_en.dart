@@ -185,6 +185,7 @@ const Map<String, String> stringsEn = {
 'Detail Retur': 'Return Details',
 'Dibuka': 'Opened',
 'Diskon dinonaktifkan.': 'Discount disabled.',
+'Draft + dipesan': 'Draft + ordered',
 'Draft + dipesan + dikirim': 'Draft + ordered + sent',
 'Fisik': 'Physical',
 'Gagal membatalkan PO.': 'Failed to cancel PO.',
@@ -396,6 +397,8 @@ const Map<String, String> stringsEn = {
   'Mengapa data produk tidak bisa diubah?': 'Why can\'t product data be edited?',
   'Metode': 'Method',
   'Mode Offline': 'Offline Mode',
+  'Mode lokal (server belum tersedia).':
+      'Local mode (server not yet available).',
   'Mutasi Terakhir': 'Latest Movements',
   'Nilai (Rp)': 'Value (Rp)',
   'Nominal (Rp)': 'Amount (Rp)',
@@ -500,6 +503,7 @@ const Map<String, String> stringsEn = {
   'Belum ada jadwal cicilan': 'No installment schedule yet',
   'Belum ada penjualan produk pada periode ini.': 'No product sales for this period.',
   'Belum ada resep untuk produk ini.': 'No recipe for this product yet.',
+  'Belum ada riwayat absensi.': 'No attendance history yet.',
   'Belum ada transaksi yang berhasil dikirim.': 'No transactions uploaded yet.',
   'Berdasarkan penjualan': 'By sales',
   'Buang': 'Discard',
@@ -708,6 +712,26 @@ const Map<String, String> stringsEn = {
   'Gagal menyimpan supplier.': 'Failed to save supplier.',
   'Ganti outlet': 'Switch outlet',
   'Grup Pelanggan': 'Customer Groups',
+  // Rekonsiliasi loyalty/promo/reports/system ↔ backend produksi (Okt 2026).
+  'Kelola dari web admin (read-only di aplikasi).':
+      'Managed from the web admin (read-only in the app).',
+  'Reward baru dibuat dari web admin.':
+      'New rewards are created from the web admin.',
+  'Template baru dibuat dari web admin.':
+      'New templates are created from the web admin.',
+  'Absensi Hari Ini': 'Today\'s Attendance',
+  'Belum clock-in hari ini.': 'You have not clocked in today.',
+  'Riwayat absensi lengkap tersedia di web admin.':
+      'Full attendance history is available in the web admin.',
+  'Riwayat server belum tersedia, menampilkan hari ini saja.':
+      'Server history is unavailable, showing today only.',
+  'Pengguna baru dibuat dari web admin.':
+      'New users are created from the web admin.',
+  'Dihitung dari 100 PO terbaru pada outlet ini.':
+      'Calculated from the 100 latest purchase orders for this outlet.',
+  'Stok Habis': 'Out of Stock',
+  'Angka dihitung server dari seluruh katalog aktif.':
+      'Figures are computed by the server across the active catalog.',
   'Gunakan printer thermal Bluetooth 58/80mm.': 'Use a 58/80mm Bluetooth thermal printer.',
   'Hapus item': 'Remove item',
   'Harga beli (Rp)': 'Purchase price (Rp)',
@@ -760,6 +784,7 @@ const Map<String, String> stringsEn = {
   'Retur disetujui. Stok bertambah.': 'Return approved. Stock increased.',
   'Reward': 'Rewards',
   'Riwayat': 'History',
+  'Riwayat Absensi': 'Attendance History',
   'Riwayat transaksi': 'Transaction history',
   'Saldo Poin Pelanggan': 'Customer Point Balance',
   'Satuan (kg/liter/pcs)': 'Unit (kg/liter/pcs)',
@@ -816,4 +841,18 @@ const Map<String, String> stringsEn = {
   'stok': 'stock',
   'transaksi berhasil dikirim ke server.': 'transactions uploaded to the server successfully.',
   'transaksi menunggu dikirim ke server': 'transactions pending upload to server',
+  // Modul sales (paritas backend 2026-10-28).
+  'Belum ada cicilan': 'No installments yet',
+  'Cicilan': 'Installment',
+  'Cicilan dibuat dari penjualan kredit di kasir.':
+      'Installments are created from credit sales at the register.',
+  'Item keranjang': 'Cart items',
+  'Jatuh tempo': 'Due date',
+  'Label (opsional)': 'Label (optional)',
+  'Metode pembayaran belum tersedia. Muat ulang lalu coba lagi.':
+      'Payment methods are unavailable. Reload and try again.',
+  'Pilih metode pembayaran.': 'Select a payment method.',
+  'Saring ID Order (opsional)': 'Filter Order ID (optional)',
+  'Transaksi dilanjutkan ({count} item). Buka kembali di kasir.':
+      'Transaction resumed ({count} items). Reopen it at the register.',
 };

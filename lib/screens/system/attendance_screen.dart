@@ -15,8 +15,10 @@ import '../../widgets/common/status_badge.dart';
 
 BadgeTone _toneForAttendance(String status) {
   switch (status.toLowerCase()) {
+    case 'present':
     case 'hadir':
       return BadgeTone.success;
+    case 'late':
     case 'terlambat':
       return BadgeTone.warning;
     case 'izin':
@@ -28,8 +30,15 @@ BadgeTone _toneForAttendance(String status) {
   }
 }
 
-/// Absensi pegawai (kontrak grup 13):
-/// GET /attendances?outlet_id=&date=, POST clock-in/out.
+/// Absensi pegawai — backend nyata (produksi):
+/// - GET /attendances/today → {data: {id, user_id, outlet_id, date,
+///   clock_in ("HH:mm:ss"), clock_out, status: present|late, notes} | null}
+/// - POST /attendances/clock-in {outlet_id, notes?}
+///   (status otomatis server: late bila lewat 08:00)
+/// - POST /attendances/clock-out (tanpa body)
+/// - GET /attendances/history?outlet_id=&from=&to=(&per_page=) → envelope
+///   {data: [...], meta} milik outlet yang bisa diakses user.
+///   Bila 404 (endpoint belum deploy) → today-only + pesan jujur.
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
 
@@ -39,8 +48,9 @@ class AttendanceScreen extends StatefulWidget {
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
   final ApiService _api = ApiService();
-  DateTime _date = DateTime.now();
-  List<Attendance> _rows = [];
+  Attendance? _today;
+  List<Attendance> _history = [];
+  bool _historyAvailable = false;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -51,28 +61,32 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
   }
 
+  static Attendance? parseToday(dynamic response) {
+    final raw = response is Map ? response['data'] : response;
+    if (raw is Map<String, dynamic>) return Attendance.fromJson(raw);
+    return null;
+  }
+
+  static List<Attendance> parseHistory(dynamic response) {
+    final raw = response is Map ? response['data'] : response;
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(Attendance.fromJson)
+        .toList();
+  }
+
   Future<void> _refresh() async {
+    final outletId = context.read<AuthProvider>().currentOutletId;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final outletId = context.read<AuthProvider>().currentOutletId;
-      final response = await _api.get(
-        '/attendances',
-        query: {
-          if (outletId != null) 'outlet_id': '$outletId',
-          'date': Fmt.dateForApi(_date),
-        },
-      );
-      final raw = response is Map ? response['data'] : response;
-      final rows = raw is List
-          ? raw.whereType<Map<String, dynamic>>().map(Attendance.fromJson).toList()
-          : <Attendance>[];
+      final response = await _api.get('/attendances/today');
       if (!mounted) return;
       setState(() {
-        _rows = rows;
-        _loading = false;
+        _today = parseToday(response);
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -80,27 +94,45 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _loading = false;
         _error = e.message;
       });
+      return;
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _error = S.tn(context, 'Gagal memuat data absensi.');
       });
+      return;
     }
-  }
-
-  Future<void> _pickDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _date,
-      firstDate: now.subtract(const Duration(days: 365)),
-      lastDate: now.add(const Duration(days: 1)),
-      helpText: S.tn(context, 'Pilih tanggal'),
-    );
-    if (picked == null) return;
-    setState(() => _date = picked);
-    await _refresh();
+    // Riwayat best-effort: gagal memuatnya tidak menutupi kartu today.
+    try {
+      final history = await _api.get(
+        '/attendances/history',
+        query: {
+          'per_page': '20',
+          if (outletId != null) 'outlet_id': '$outletId',
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _history = parseHistory(history);
+        _historyAvailable = true;
+        _loading = false;
+      });
+    } on ApiException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _history = [];
+        _historyAvailable = false;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _history = [];
+        _historyAvailable = false;
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _clock(String action) async {
@@ -145,6 +177,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final today = _today;
+    final clockedIn =
+        today != null && (today.clockIn?.isNotEmpty ?? false);
+    final clockedOut =
+        today != null && (today.clockOut?.isNotEmpty ?? false);
     return Scaffold(
       appBar: AppBar(
         title: Text(S.t(context, 'Absensi')),
@@ -168,25 +205,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pickDate,
-                    icon: const Icon(Icons.calendar_month_outlined, size: 18),
-                    label: Text(Fmt.dateForApi(_date)),
+                  child: FilledButton.icon(
+                    key: const ValueKey('clock_in_button'),
+                    onPressed: (_busy || clockedIn) ? null : () => _clock('clock-in'),
+                    icon: const Icon(Icons.login, size: 18),
+                    label: Text(S.t(context, 'Clock In')),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                FilledButton.icon(
-                  key: const ValueKey('clock_in_button'),
-                  onPressed: _busy ? null : () => _clock('clock-in'),
-                  icon: const Icon(Icons.login, size: 18),
-                  label: Text(S.t(context, 'Clock In')),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                OutlinedButton.icon(
-                  key: const ValueKey('clock_out_button'),
-                  onPressed: _busy ? null : () => _clock('clock-out'),
-                  icon: const Icon(Icons.logout, size: 18),
-                  label: Text(S.t(context, 'Clock Out')),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('clock_out_button'),
+                    onPressed: (_busy || !clockedIn || clockedOut)
+                        ? null
+                        : () => _clock('clock-out'),
+                    icon: const Icon(Icons.logout, size: 18),
+                    label: Text(S.t(context, 'Clock Out')),
+                  ),
                 ),
               ],
             ),
@@ -199,21 +234,35 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _buildBody() {
-    if (_loading) return const LoadingSkeleton(items: 6, itemHeight: 64);
+    if (_loading) return const LoadingSkeleton(items: 3, itemHeight: 88);
     if (_error != null) return ErrorState(message: _error!, onRetry: _refresh);
-    if (_rows.isEmpty) {
-      return EmptyState(
-        icon: Icons.fact_check_outlined,
-        title: S.t(context, 'Belum ada absensi'),
-        message: S.t(
-          context,
-          'Catat kehadiran dengan tombol Clock In di atas.',
+    final today = _today;
+    if (today == null) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.xl,
+          ),
+          children: [
+            EmptyState(
+              icon: Icons.fact_check_outlined,
+              title: S.t(context, 'Belum ada absensi'),
+              message: S.t(context, 'Belum clock-in hari ini.'),
+            ),
+            _historySection(),
+            if (!_historyAvailable) _webAdminNote(),
+          ],
         ),
       );
     }
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: ListView.builder(
+      child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.md,
@@ -221,48 +270,181 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           AppSpacing.md,
           AppSpacing.xl,
         ),
-        itemCount: _rows.length,
-        itemBuilder: (_, i) => _rowCard(_rows[i]),
+        children: [
+          _todayCard(today),
+          _historySection(),
+          if (!_historyAvailable) _webAdminNote(),
+        ],
       ),
     );
   }
 
-  Widget _rowCard(Attendance a) {
+  Widget _webAdminNote() {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: Text(
+        S.t(
+          context,
+          'Riwayat absensi lengkap tersedia di web admin.',
+        ),
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+
+  /// Riwayat dari GET /attendances/history. Bila endpoint belum tersedia
+  /// di server (404) → pesan jujur, layar tetap today-only.
+  Widget _historySection() {
     final theme = Theme.of(context);
-    final name = (a.userName == null || a.userName!.isEmpty)
-        ? S.t(context, 'Tanpa nama')
-        : a.userName!;
-    final time = [
-      if (a.clockIn != null && a.clockIn!.isNotEmpty)
-        '${S.t(context, 'Masuk')} ${a.clockIn!.length >= 16 ? a.clockIn!.substring(11, 16) : a.clockIn!}',
-      if (a.clockOut != null && a.clockOut!.isNotEmpty)
-        '${S.t(context, 'Keluar')} ${a.clockOut!.length >= 16 ? a.clockOut!.substring(11, 16) : a.clockOut!}',
-    ].join(' · ');
+    if (!_historyAvailable) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: Text(
+          S.t(
+            context,
+            'Riwayat server belum tersedia, menampilkan hari ini saja.',
+          ),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(
+            top: AppSpacing.md,
+            bottom: AppSpacing.sm,
+          ),
+          child: Text(
+            S.t(context, 'Riwayat Absensi'),
+            style: theme.textTheme.titleSmall?.copyWith(fontSize: 14),
+          ),
+        ),
+        if (_history.isEmpty)
+          Text(
+            S.t(context, 'Belum ada riwayat absensi.'),
+            style: theme.textTheme.bodySmall,
+          )
+        else
+          for (final h in _history) _historyTile(h),
+      ],
+    );
+  }
+
+  Widget _historyTile(Attendance h) {
+    final name = (h.userName ?? '').trim();
     return Card(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.primaryContainer,
-          child: Text(
-            name.substring(0, 1).toUpperCase(),
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
-          ),
-        ),
+        dense: true,
         title: Text(
-          name,
-          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+          h.date ?? '-',
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
-          time.isEmpty ? (a.date ?? '-') : time,
-          style: const TextStyle(fontSize: 11.5),
+          '${S.t(context, 'Masuk')} ${_shortTime(h.clockIn)}'
+          ' • ${S.t(context, 'Keluar')} ${_shortTime(h.clockOut)}'
+          '${name.isEmpty ? '' : '\n$name'}',
+          style: const TextStyle(fontSize: 12),
         ),
+        isThreeLine: name.isNotEmpty,
         trailing: StatusBadge(
-          Attendance.statusLabel(a.status),
-          tone: _toneForAttendance(a.status),
+          Attendance.statusLabel(h.status),
+          tone: _toneForAttendance(h.status),
         ),
+      ),
+    );
+  }
+
+  String _shortTime(String? v) {
+    if (v == null || v.isEmpty) return '-';
+    // Backend mengirim "HH:mm:ss" — tampilkan "HH:mm".
+    if (v.length >= 5 && !v.contains('T')) return v.substring(0, 5);
+    if (v.length >= 16 && v.contains('T')) return v.substring(11, 16);
+    return v;
+  }
+
+  Widget _todayCard(Attendance a) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    S.t(context, 'Absensi Hari Ini'),
+                    style: theme.textTheme.titleSmall?.copyWith(fontSize: 14),
+                  ),
+                ),
+                StatusBadge(
+                  Attendance.statusLabel(a.status),
+                  tone: _toneForAttendance(a.status),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              a.date ?? Fmt.dateForApi(DateTime.now()),
+              style: theme.textTheme.bodySmall,
+            ),
+            const Divider(height: AppSpacing.xl),
+            Row(
+              children: [
+                Expanded(
+                  child: _timeTile(
+                    context,
+                    Icons.login,
+                    S.t(context, 'Masuk'),
+                    _shortTime(a.clockIn),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: _timeTile(
+                    context,
+                    Icons.logout,
+                    S.t(context, 'Keluar'),
+                    _shortTime(a.clockOut),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _timeTile(
+    BuildContext context,
+    IconData icon,
+    String label,
+    String value,
+  ) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 20, color: theme.colorScheme.primary),
+          const SizedBox(height: 4),
+          Text(label, style: theme.textTheme.bodySmall),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          ),
+        ],
       ),
     );
   }

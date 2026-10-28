@@ -12,7 +12,11 @@ import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/common/status_badge.dart';
 
 /// Detail transfer stok: info rute, item, dan aksi workflow
-/// draft → kirim → terima sesuai status.
+/// draft → send → receive sesuai status backend.
+///
+/// Sumber utama: `GET /stock-transfers/{id}` (relasi `stockTransferItems`,
+/// `fromOutlet`/`toOutlet`). Bila server lama menjawab 404, data bawaan
+/// dari daftar tetap ditampilkan dengan penanda jujur + tombol retry.
 class TransferDetailScreen extends StatefulWidget {
   final int transferId;
   final StockTransfer? initial;
@@ -34,6 +38,10 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
   bool _loading = true;
   String? _error;
   bool _busy = false;
+
+  /// True bila GET detail 404 (server lama tanpa endpoint detail)
+  /// sehingga yang tampil adalah data bawaan dari daftar.
+  bool _staleDetail = false;
 
   @override
   void initState() {
@@ -59,6 +67,10 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
         if (data is Map<String, dynamic>) {
           _transfer = StockTransfer.fromJson(data);
           _error = null;
+          _staleDetail = false;
+        } else if (_transfer != null) {
+          _staleDetail = true;
+          _error = null;
         } else {
           _error = S.tn(context, 'Transfer tidak ditemukan.');
         }
@@ -67,7 +79,12 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.message;
+        if (e.statusCode == 404 && _transfer != null) {
+          _staleDetail = true;
+          _error = null;
+        } else {
+          _error = e.message;
+        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -112,7 +129,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
     );
     if (!ok || !mounted) return;
     await _doAction(
-      'ship',
+      'send',
       S.tn(context, 'Transfer dikirim ke outlet tujuan.'),
     );
   }
@@ -164,6 +181,33 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
+          if (_staleDetail)
+            Card(
+              color: AppColors.warningSoft,
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 18),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        S.t(
+                          context,
+                          'Detail terbaru belum tersedia di server (404). Menampilkan data dari daftar.',
+                        ),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _load,
+                      child: Text(S.t(context, 'Coba Lagi')),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (_staleDetail) const SizedBox(height: AppSpacing.md),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
@@ -285,7 +329,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
           ),
         ),
       );
-    } else if (t.status == 'dikirim') {
+    } else if (t.status == 'sent' || t.status == 'dikirim') {
       buttons.add(
         Expanded(
           child: FilledButton.icon(

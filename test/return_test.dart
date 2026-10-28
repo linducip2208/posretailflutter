@@ -18,16 +18,20 @@ Widget _wrap(Widget child) {
   );
 }
 
+/// Bentuk backend: return_number, returnItems{quantity}, total_amount,
+/// status pending|completed|rejected, relasi order.
 Map<String, dynamic> _returJson({String status = 'pending'}) => {
   'id': 5,
   'order_id': 12,
   'order_number': 'ORD-012',
+  'return_number': 'RT-20261020-0005',
   'outlet_id': 1,
   'status': status,
+  'total_amount': '20000.00',
   'reason': 'Barang cacat',
   'created_at': '2026-10-20T10:00:00Z',
-  'items': [
-    {'product_id': 3, 'product_name': 'Kopi 250g', 'qty': 2},
+  'returnItems': [
+    {'product_id': 3, 'product_name': 'Kopi 250g', 'quantity': 2},
   ],
 };
 
@@ -55,21 +59,33 @@ MockClient _listClient({int listStatus = 200}) {
   });
 }
 
-MockClient _detailClient() {
-  var approved = false;
+MockClient _detailClient({bool withReject = false}) {
+  var status = 'pending';
   return MockClient((request) async {
     final path = request.url.path;
     if (request.method == 'POST' && path.endsWith('/approve')) {
-      approved = true;
+      status = 'completed';
       return http.Response(
-        jsonEncode({'data': _returJson(status: 'approved')}),
+        jsonEncode({'data': _returJson(status: 'completed')}),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (withReject &&
+        request.method == 'POST' &&
+        path.endsWith('/reject')) {
+      status = 'rejected';
+      return http.Response(
+        jsonEncode({'data': _returJson(status: 'rejected')}),
         200,
         headers: {'content-type': 'application/json'},
       );
     }
     if (request.method == 'GET' && path.endsWith('/returns/5')) {
       return http.Response(
-        jsonEncode({'data': _returJson(status: approved ? 'approved' : 'pending')}),
+        jsonEncode({
+          'data': _returJson(status: status),
+        }),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -91,7 +107,7 @@ void main() {
     await tester.pumpWidget(_wrap(const ReturnListScreen(outletId: 1)));
     await tester.pumpAndSettle();
 
-    expect(find.text('RET #5'), findsOneWidget);
+    expect(find.text('RT-20261020-0005'), findsOneWidget);
     expect(find.textContaining('ORD-012'), findsOneWidget);
     expect(find.text('Menunggu'), findsWidgets);
   });
@@ -106,13 +122,13 @@ void main() {
     expect(find.text('Coba Lagi'), findsOneWidget);
   });
 
-  testWidgets('approve sukses → snackbar + status berubah', (tester) async {
+  testWidgets('approve sukses → snackbar + status selesai', (tester) async {
     ApiService.client = _detailClient();
 
     await tester.pumpWidget(_wrap(const ReturnDetailScreen(returnId: 5)));
     await tester.pumpAndSettle();
 
-    expect(find.text('RET #5'), findsWidgets);
+    expect(find.text('RT-20261020-0005'), findsWidgets);
     expect(find.text('Setujui'), findsOneWidget);
 
     await tester.tap(find.text('Setujui'));
@@ -123,6 +139,41 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Retur disetujui. Stok bertambah.'), findsOneWidget);
-    expect(find.text('Disetujui'), findsWidgets);
+    expect(find.text('Selesai'), findsWidgets);
+  });
+
+  testWidgets('reject sukses → snackbar + status ditolak', (tester) async {
+    // Backend baru: POST /returns/{id}/reject {reason?} → status rejected.
+    ApiService.client = _detailClient(withReject: true);
+
+    await tester.pumpWidget(_wrap(const ReturnDetailScreen(returnId: 5)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Tolak'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tolak retur?'), findsOneWidget);
+    await tester.tap(find.text('Tolak Retur'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Retur ditolak.'), findsOneWidget);
+    expect(find.text('Ditolak'), findsWidgets);
+  });
+
+  testWidgets('reject di server lama → 404 jujur via snackbar', (tester) async {
+    // Server lama tanpa POST /returns/{id}/reject.
+    ApiService.client = _detailClient(withReject: false);
+
+    await tester.pumpWidget(_wrap(const ReturnDetailScreen(returnId: 5)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Tolak'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tolak retur?'), findsOneWidget);
+    await tester.tap(find.text('Tolak Retur'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Data tidak ditemukan.'), findsOneWidget);
   });
 }

@@ -12,6 +12,11 @@ import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/common/status_badge.dart';
 
 /// Detail retur: info, item, alasan + aksi approve/reject sesuai status.
+///
+/// Kontrak backend: `GET /returns/{id}` (relasi `returnItems.product` +
+/// `order`), `POST /returns/{id}/approve` → `completed`,
+/// `POST /returns/{id}/reject {reason?}` → `rejected`. 404 berarti server
+/// lama yang belum diperbarui — dilaporkan jujur.
 class ReturnDetailScreen extends StatefulWidget {
   final int returnId;
   final ReturnOrder? initial;
@@ -60,16 +65,32 @@ class _ReturnDetailScreenState extends State<ReturnDetailScreen> {
       });
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.message;
-      });
+      if (_retur != null) {
+        // GET /returns/{id} ada di backend baru; 404 berarti server lama
+        // yang belum diperbarui: tampilkan data awal + pesan jujur.
+        setState(() => _loading = false);
+        showAppSnackbar(context, e.message, type: SnackType.error);
+      } else {
+        setState(() {
+          _loading = false;
+          _error = e.message;
+        });
+      }
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = S.tn(context, 'Gagal memuat detail retur.');
-      });
+      if (_retur != null) {
+        setState(() => _loading = false);
+        showAppSnackbar(
+          context,
+          S.tn(context, 'Gagal memuat detail retur.'),
+          type: SnackType.error,
+        );
+      } else {
+        setState(() {
+          _loading = false;
+          _error = S.tn(context, 'Gagal memuat detail retur.');
+        });
+      }
     }
   }
 
@@ -111,36 +132,10 @@ class _ReturnDetailScreenState extends State<ReturnDetailScreen> {
   }
 
   Future<void> _confirmAndReject() async {
-    final reasonCtrl = TextEditingController();
     final reason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(S.tn(context, 'Tolak retur?')),
-        content: TextField(
-          controller: reasonCtrl,
-          autofocus: true,
-          maxLines: 2,
-          decoration: InputDecoration(
-            labelText: S.tn(context, 'Alasan penolakan'),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(S.tn(context, 'Batal')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, reasonCtrl.text.trim()),
-            child: Text(S.tn(context, 'Tolak Retur')),
-          ),
-        ],
-      ),
+      builder: (_) => const _RejectDialog(),
     );
-    reasonCtrl.dispose();
     if (reason == null || !mounted) return;
     await _doAction(
       'reject',
@@ -212,6 +207,11 @@ class _ReturnDetailScreenState extends State<ReturnDetailScreen> {
                     S.t(context, 'Tanggal'),
                     Fmt.dateTime(r.createdAt),
                   ),
+                  if (r.totalAmount > 0)
+                    _infoRow(
+                      S.t(context, 'Total'),
+                      Fmt.rupiah(r.totalAmount),
+                    ),
                   if (r.reason != null && r.reason!.isNotEmpty)
                     _infoRow(S.t(context, 'Alasan'), r.reason!),
                 ],
@@ -315,8 +315,7 @@ class _ReturnDetailScreenState extends State<ReturnDetailScreen> {
     );
   }
 
-  Widget _infoRow(String label, String value) {
-    final theme = Theme.of(context);
+  Widget _infoRow(String label, String value) {    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
@@ -340,6 +339,54 @@ class _ReturnDetailScreenState extends State<ReturnDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Dialog alasan penolakan: controller dimiliki dialog sendiri agar tidak
+/// di-dispose saat rute dialog masih beranimasi keluar.
+class _RejectDialog extends StatefulWidget {
+  const _RejectDialog();
+
+  @override
+  State<_RejectDialog> createState() => _RejectDialogState();
+}
+
+class _RejectDialogState extends State<_RejectDialog> {
+  final _reasonCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(S.tn(context, 'Tolak retur?')),
+      content: TextField(
+        controller: _reasonCtrl,
+        autofocus: true,
+        maxLines: 2,
+        decoration: InputDecoration(
+          labelText: S.tn(context, 'Alasan penolakan'),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(S.tn(context, 'Batal')),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.error,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () => Navigator.pop(context, _reasonCtrl.text.trim()),
+          child: Text(S.tn(context, 'Tolak Retur')),
+        ),
+      ],
     );
   }
 }

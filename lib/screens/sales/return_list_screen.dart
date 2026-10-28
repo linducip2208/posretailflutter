@@ -29,7 +29,7 @@ class ReturnListScreen extends StatefulWidget {
 }
 
 class _ReturnListScreenState extends State<ReturnListScreen> {
-  static const _filters = ['semua', 'pending', 'approved', 'rejected'];
+  static const _filters = ['semua', 'pending', 'completed', 'rejected'];
 
   final ApiService _api = ApiService();
   final ScrollController _scrollCtrl = ScrollController();
@@ -370,7 +370,8 @@ class _ReturnFormDialogState extends State<_ReturnFormDialog> {
     }
     final items = _items
         .where((e) => e.productId > 0 && e.qty > 0)
-        .map((e) => {'product_id': e.productId, 'qty': e.qty})
+        // Backend: items.*.quantity (bukan qty).
+        .map((e) => {'product_id': e.productId, 'quantity': e.qty})
         .toList();
     if (items.isEmpty) {
       setState(

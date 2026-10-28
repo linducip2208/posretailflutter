@@ -77,8 +77,12 @@ class RoleInfo {
     if (json is String) return RoleInfo(name: json.toLowerCase());
     if (json is Map<String, dynamic>) {
       final rawPerms = json['permissions'];
+      // Backend nyata: {id, name, slug, description} — slug adalah
+      // kunci stabil (owner/admin/manager/kasir/gudang).
+      final key =
+          json['slug']?.toString() ?? json['name']?.toString() ?? 'kasir';
       return RoleInfo(
-        name: safeString(json['name'], 'kasir').toLowerCase(),
+        name: key.toLowerCase(),
         permissions: rawPerms is List
             ? rawPerms.map((e) => e.toString()).toList()
             : const [],
@@ -146,13 +150,16 @@ class Attendance {
 
   static String statusLabel(String status) {
     switch (status.toLowerCase()) {
+      case 'present':
+      case 'hadir':
+        return 'Hadir';
+      case 'late':
       case 'terlambat':
         return 'Terlambat';
       case 'izin':
         return 'Izin';
       case 'sakit':
         return 'Sakit';
-      case 'hadir':
       default:
         return 'Hadir';
     }

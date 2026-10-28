@@ -5,7 +5,6 @@ import '../../models/loyalty.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import '../../widgets/common/app_snackbar.dart';
 import '../../widgets/common/empty_state.dart';
 import '../../widgets/common/error_state.dart';
 import '../../widgets/common/loading_skeleton.dart';
@@ -14,9 +13,8 @@ import '../../widgets/common/status_badge.dart';
 /// Daftar grup pelanggan (GET /customer-groups): info diskon per grup
 /// + syarat auto-upgrade (min_spent).
 ///
-/// Kontrak hanya mendefinisikan GET untuk grup ini, jadi layar bersifat
-/// read-only yang jujur: tambah/ubah grup hanya dicoba bila server
-/// mendukung POST/PUT; bila 404/405, tampilkan pesan read-only yang jujur.
+/// Backend nyata hanya menyediakan GET (read-only), jadi layar bersifat
+/// read-only yang jujur: grup dikelola dari web admin.
 class CustomerGroupScreen extends StatefulWidget {
   const CustomerGroupScreen({super.key});
 
@@ -30,7 +28,6 @@ class _CustomerGroupScreenState extends State<CustomerGroupScreen> {
   List<CustomerGroup> _groups = [];
   bool _loading = true;
   String? _error;
-  bool _writeSupported = true;
 
   @override
   void initState() {
@@ -81,42 +78,6 @@ class _CustomerGroupScreenState extends State<CustomerGroupScreen> {
     }
   }
 
-  Future<void> _tryWrite() async {
-    // Backend kontrak grup 9 hanya GET — coba POST probe yang jujur.
-    // Bila server menolak (404/405), tandai read-only dan beri tahu user.
-    try {
-      await _api.post(
-        '/customer-groups',
-        body: const {'name': '__probe__', 'discount_percent': 0},
-      );
-      // Bila 2xx (backend mendukung tulis), langsung refresh.
-      if (!mounted) return;
-      await _refresh();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      if (e.statusCode == 404 || e.statusCode == 405) {
-        setState(() => _writeSupported = false);
-        showAppSnackbar(
-          context,
-          S.tn(
-            context,
-            'Grup pelanggan read-only di server (hanya tampil + refresh).',
-          ),
-          type: SnackType.info,
-        );
-      } else {
-        showAppSnackbar(context, e.message, type: SnackType.error);
-      }
-    } catch (_) {
-      if (!mounted) return;
-      showAppSnackbar(
-        context,
-        S.tn(context, 'Gagal menghubungi server.'),
-        type: SnackType.error,
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -132,28 +93,27 @@ class _CustomerGroupScreenState extends State<CustomerGroupScreen> {
       ),
       body: Column(
         children: [
-          if (!_writeSupported)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.md,
-                AppSpacing.md,
-                0,
-              ),
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              child: Text(
-                S.t(
-                  context,
-                  'Grup pelanggan dikelola dari web admin (read-only di aplikasi). Data diskon dan syarat upgrade tampil di bawah.',
-                ),
-                style: const TextStyle(fontSize: 12),
-              ),
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              0,
             ),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Text(
+              S.t(
+                context,
+                'Grup pelanggan dikelola dari web admin (read-only di aplikasi). Data diskon dan syarat upgrade tampil di bawah.',
+              ),
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
           Expanded(child: _buildBody()),
         ],
       ),
@@ -183,26 +143,8 @@ class _CustomerGroupScreenState extends State<CustomerGroupScreen> {
       child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpacing.md),
-        itemCount: sorted.length + 1,
-        itemBuilder: (_, i) {
-          if (i == sorted.length) {
-            return Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Center(
-                child: OutlinedButton.icon(
-                  onPressed: _tryWrite,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: Text(
-                    _writeSupported
-                        ? S.t(context, 'Kelola grup (cek dukungan server)')
-                        : S.t(context, 'Muat ulang'),
-                  ),
-                ),
-              ),
-            );
-          }
-          return _groupCard(sorted[i], i, sorted);
-        },
+        itemCount: sorted.length,
+        itemBuilder: (_, i) => _groupCard(sorted[i], i, sorted),
       ),
     );
   }

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../../config/api_config.dart';
 import '../../l10n/s.dart';
+import '../../models/purchase_order.dart';
 import '../../models/supplier.dart';
 import '../../services/api_service.dart';
 import '../../services/secure_token_storage.dart';
@@ -22,6 +23,10 @@ import '../../widgets/common/status_badge.dart';
 /// PUT/DELETE belum tersedia di [ApiService], jadi operasi tulis selain
 /// POST dilakukan lewat [ApiService.client] langsung (tetap memakai token
 /// dan pesan error manusiawi yang sama). GET/POST tetap via [ApiService].
+/// Kontrak backend baru: `PUT /suppliers/{id}`
+/// (`name?/contact_person?/phone?/email?/address?`) dan
+/// `DELETE /suppliers/{id}` (409 bila masih punya PO). 404 berarti server
+/// lama yang belum diperbarui — dilaporkan jujur.
 Future<dynamic> _sendWrite(
   String method,
   String path, {
@@ -293,7 +298,16 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
       await _refresh();
     } on ApiException catch (e) {
       if (!mounted) return;
-      showAppSnackbar(context, e.message, type: SnackType.error);
+      showAppSnackbar(
+        context,
+        e.statusCode == 404
+            ? S.tn(
+                context,
+                'Hapus supplier belum tersedia di server (mungkin belum diperbarui). Coba lagi nanti.',
+              )
+            : e.message,
+        type: SnackType.error,
+      );
     } catch (_) {
       if (!mounted) return;
       showAppSnackbar(
@@ -470,13 +484,15 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                 }
               },
               itemBuilder: (_) => [
+                // itemBuilder dipanggil dari gesture handler (di luar fase
+                // build), jadi pakai S.tn (read) bukan S.t (watch).
                 PopupMenuItem(
                   value: 'edit',
-                  child: Text(S.t(context, 'Ubah')),
+                  child: Text(S.tn(context, 'Ubah')),
                 ),
                 PopupMenuItem(
                   value: 'delete',
-                  child: Text(S.t(context, 'Hapus')),
+                  child: Text(S.tn(context, 'Hapus')),
                 ),
               ],
             ),
@@ -503,6 +519,9 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
   late final TextEditingController _nameCtrl = TextEditingController(
     text: widget.existing?.name ?? '',
   );
+  late final TextEditingController _contactCtrl = TextEditingController(
+    text: widget.existing?.contactPerson ?? '',
+  );
   late final TextEditingController _phoneCtrl = TextEditingController(
     text: widget.existing?.phone ?? '',
   );
@@ -521,6 +540,7 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _contactCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
     _addressCtrl.dispose();
@@ -545,6 +565,9 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
     try {
       final body = <String, dynamic>{
         'name': name,
+        // Kontrak backend: `contact_person` (nullable, max 255).
+        if (_contactCtrl.text.trim().isNotEmpty)
+          'contact_person': _contactCtrl.text.trim(),
         if (_phoneCtrl.text.trim().isNotEmpty)
           'phone': _phoneCtrl.text.trim(),
         if (email.isNotEmpty) 'email': email,
@@ -563,6 +586,9 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
         result = Supplier(
           id: widget.existing!.id,
           name: name,
+          contactPerson: _contactCtrl.text.trim().isEmpty
+              ? null
+              : _contactCtrl.text.trim(),
           phone: _phoneCtrl.text.trim().isEmpty
               ? null
               : _phoneCtrl.text.trim(),
@@ -577,12 +603,21 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = e.statusCode == 422
-            ? S.tn(
-                context,
-                'Data tidak valid. Pastikan email belum digunakan supplier lain.',
-              )
-            : e.message;
+        // PUT /suppliers/{id} ada di backend baru; 404 berarti server
+        // lama yang belum diperbarui — dilaporkan jujur.
+        if (e.statusCode == 404 && _isEdit) {
+          _error = S.tn(
+            context,
+            'Ubah supplier belum tersedia di server (mungkin belum diperbarui). Coba lagi nanti.',
+          );
+        } else {
+          _error = e.statusCode == 422
+              ? S.tn(
+                  context,
+                  'Data tidak valid. Pastikan email belum digunakan supplier lain.',
+                )
+              : e.message;
+        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -621,6 +656,14 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
               autofocus: true,
               decoration: InputDecoration(
                 labelText: '${S.t(context, 'Nama')} *',
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              key: const ValueKey('supplier_contact_field'),
+              controller: _contactCtrl,
+              decoration: InputDecoration(
+                labelText: S.t(context, 'Kontak person'),
               ),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -702,10 +745,51 @@ class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
     try {
       final response = await _api.get('/suppliers/${_supplier.id}');
       final data = response is Map ? response['data'] : null;
+      // GET /suppliers/{id} backend hanya mengembalikan `po_count`
+      // (tanpa daftar PO), jadi riwayat diambil lewat filter yang didukung:
+      // GET /purchase-orders?supplier_id={id}.
+      List<SupplierPo> history = const [];
+      try {
+        final poResponse = await _api.get(
+          '/purchase-orders',
+          query: {'supplier_id': '${_supplier.id}', 'per_page': '20'},
+        );
+        final poData = poResponse is Map ? poResponse['data'] : poResponse;
+        if (poData is List) {
+          history = poData
+              .whereType<Map<String, dynamic>>()
+              .map(
+                (m) => SupplierPo.fromJson({
+                  'id': m['id'],
+                  'po_number': m['po_number'] ?? m['number'],
+                  'status': m['status'],
+                  'total_amount':
+                      m['total_amount'] ?? m['total_cost'] ?? m['total'],
+                  'created_at': m['created_at'] ?? m['date'],
+                }),
+              )
+              .toList();
+        }
+      } catch (_) {
+        // Riwayat opsional: abaikan bila gagal, info supplier tetap tampil.
+      }
       if (!mounted) return;
       setState(() {
         if (data is Map<String, dynamic>) {
-          _supplier = Supplier.fromJson(data);
+          final parsed = Supplier.fromJson(data);
+          _supplier = Supplier(
+            id: parsed.id,
+            name: parsed.name,
+            contactPerson: parsed.contactPerson,
+            phone: parsed.phone,
+            email: parsed.email,
+            address: parsed.address,
+            poCount: parsed.poCount,
+            createdAt: parsed.createdAt,
+            purchaseOrders: history.isNotEmpty
+                ? history
+                : parsed.purchaseOrders,
+          );
         }
         _reloading = false;
       });
@@ -779,6 +863,7 @@ class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
+          _infoRow(context, S.t(context, 'Kontak person'), s.contactPerson),
           _infoRow(context, S.t(context, 'Telepon'), s.phone),
           _infoRow(context, S.t(context, 'Email'), s.email),
           _infoRow(context, S.t(context, 'Alamat'), s.address),
@@ -874,7 +959,10 @@ class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
               ),
             ),
             if (po.status != null && po.status!.isNotEmpty)
-              StatusBadge(po.status!, tone: BadgeTone.neutral),
+              StatusBadge(
+                poStatusLabel(po.status!),
+                tone: toneForPoStatus(po.status!),
+              ),
           ],
         ),
       ),

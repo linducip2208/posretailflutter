@@ -1,16 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
-import '../../config/api_config.dart';
 import '../../l10n/s.dart';
 import '../../models/customer.dart';
 import '../../models/loyalty.dart';
 import '../../services/api_service.dart';
-import '../../services/secure_token_storage.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/common/app_snackbar.dart';
@@ -19,65 +14,15 @@ import '../../widgets/common/error_state.dart';
 import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/common/status_badge.dart';
 
-/// PUT via [ApiService.client] langsung (ApiService belum menyediakan PUT),
-/// pola yang sama seperti supplier_list_screen.dart.
-Future<dynamic> _sendPut(
-  String path, {
-  Map<String, dynamic>? body,
-}) async {
-  String? token;
-  try {
-    token = await SecureTokenStorage().readToken();
-  } catch (_) {
-    token = null;
-  }
-  final uri = Uri.parse('${ApiConfig.baseUrl}$path');
-  final headers = <String, String>{
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-  };
-  http.Response response;
-  try {
-    response = await ApiService.client
-        .put(uri, headers: headers, body: body != null ? jsonEncode(body) : null)
-        .timeout(ApiConfig.requestTimeout);
-  } on TimeoutException {
-    throw ApiNetworkException(
-      'Koneksi ke server timeout. Periksa jaringan lalu coba lagi.',
-    );
-  } on SocketException {
-    throw ApiNetworkException(
-      'Tidak dapat terhubung ke server. Periksa jaringan Anda.',
-    );
-  } on http.ClientException {
-    throw ApiNetworkException(
-      'Koneksi ke server gagal. Periksa jaringan Anda.',
-    );
-  }
-  dynamic decoded;
-  try {
-    decoded = response.body.isNotEmpty ? jsonDecode(response.body) : {};
-  } catch (_) {
-    decoded = {};
-  }
-  if (response.statusCode >= 200 && response.statusCode < 300) return decoded;
-  throw ApiException(
-    statusCode: response.statusCode,
-    message:
-        (decoded is Map && decoded['message'] != null
-            ? decoded['message'].toString()
-            : null) ??
-        (response.statusCode == 404
-            ? 'Data reward tidak ditemukan di server.'
-            : 'Request gagal.'),
-    errors: decoded is Map ? decoded['errors'] : null,
-  );
-}
-
-/// Katalog reward loyalitas (GET /loyalty-rewards?active=),
-/// tambah/ubah (POST/PUT), redeem untuk customer,
-/// dan lihat saldo poin (GET /loyalty-points?customer_id=).
+/// Katalog reward loyalitas — backend nyata (produksi, read-only):
+/// - GET /loyalty/rewards (envelope `{data: [...]}`, hanya active=true,
+///   urut points_required) → {id, name, points_required,
+///   discount_type, discount_value, active}
+/// - POST /loyalty/redeem {customer_id, reward_id}
+/// - GET /loyalty/summary?customer_id= → saldo poin
+///
+/// Tidak ada CRUD reward di backend, jadi layar ini read-only yang jujur:
+/// tambah/ubah reward dilakukan dari web admin.
 class RewardListScreen extends StatefulWidget {
   const RewardListScreen({super.key});
 
@@ -120,14 +65,17 @@ class _RewardListScreenState extends State<RewardListScreen> {
       _error = null;
     });
     try {
-      final response = await _api.get(
-        '/loyalty-rewards',
-        query: {if (_activeFilter != null) 'active': _activeFilter},
-      );
+      final response = await _api.get('/loyalty/rewards');
       final data = response is Map ? response['data'] : response;
+      var rewards = parseList(data);
+      // Backend hanya mengembalikan active=true; filter nonaktif
+      // client-side untuk segmen "Nonaktif" (hasilnya kosong, jujur).
+      if (_activeFilter == '0') {
+        rewards = rewards.where((r) => !r.active).toList();
+      }
       if (!mounted) return;
       setState(() {
-        _rewards = parseList(data);
+        _rewards = rewards;
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -143,34 +91,6 @@ class _RewardListScreenState extends State<RewardListScreen> {
         _error = S.tn(context, 'Gagal memuat katalog reward.');
       });
     }
-  }
-
-  Future<void> _openCreateDialog() async {
-    final created = await showDialog<LoyaltyReward>(
-      context: context,
-      builder: (_) => const _RewardFormDialog(),
-    );
-    if (created == null || !mounted) return;
-    showAppSnackbar(
-      context,
-      '${S.tn(context, 'Reward')} "${created.name}" ${S.tn(context, 'tersimpan di server.')}',
-      type: SnackType.success,
-    );
-    await _refresh();
-  }
-
-  Future<void> _openEditDialog(LoyaltyReward reward) async {
-    final updated = await showDialog<LoyaltyReward>(
-      context: context,
-      builder: (_) => _RewardFormDialog(existing: reward),
-    );
-    if (updated == null || !mounted) return;
-    showAppSnackbar(
-      context,
-      S.tn(context, 'Reward berhasil diperbarui.'),
-      type: SnackType.success,
-    );
-    await _refresh();
   }
 
   Future<void> _openRedeemDialog(LoyaltyReward reward) async {
@@ -200,11 +120,6 @@ class _RewardListScreenState extends State<RewardListScreen> {
             icon: const Icon(Icons.account_balance_wallet_outlined),
           ),
           IconButton(
-            tooltip: S.t(context, 'Tambah reward'),
-            onPressed: _openCreateDialog,
-            icon: const Icon(Icons.card_giftcard_outlined),
-          ),
-          IconButton(
             tooltip: S.t(context, 'Muat ulang'),
             onPressed: _loading ? null : _refresh,
             icon: const Icon(Icons.refresh),
@@ -213,6 +128,27 @@ class _RewardListScreenState extends State<RewardListScreen> {
       ),
       body: Column(
         children: [
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              0,
+            ),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Text(
+              S.t(
+                context,
+                'Kelola dari web admin (read-only di aplikasi).',
+              ),
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.md,
@@ -261,10 +197,7 @@ class _RewardListScreenState extends State<RewardListScreen> {
       return EmptyState(
         icon: Icons.card_giftcard_outlined,
         title: S.t(context, 'Tidak ada reward'),
-        message: S.t(
-          context,
-          'Tambah reward baru dengan tombol di kanan atas.',
-        ),
+        message: S.t(context, 'Reward baru dibuat dari web admin.'),
       );
     }
     return RefreshIndicator(
@@ -281,6 +214,19 @@ class _RewardListScreenState extends State<RewardListScreen> {
         itemBuilder: (_, i) => _rewardCard(_rewards[i]),
       ),
     );
+  }
+
+  String _benefitLabel(LoyaltyReward reward) {
+    final type = reward.discountType;
+    if (type == null || type.isEmpty) return '';
+    if (type == 'percent') {
+      final v = reward.discountValue;
+      return ' · ${S.t(context, 'Diskon')} ${v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 1)}%';
+    }
+    if (type == 'fixed') {
+      return ' · ${S.t(context, 'Diskon')} ${Fmt.rupiah(reward.discountValue)}';
+    }
+    return ' · $type';
   }
 
   Widget _rewardCard(LoyaltyReward reward) {
@@ -300,7 +246,7 @@ class _RewardListScreenState extends State<RewardListScreen> {
           style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
-          '${reward.pointsCost} ${S.t(context, 'poin')} · ${S.t(context, 'Stok')}: ${reward.stock}',
+          '${reward.pointsRequired} ${S.t(context, 'poin')}${_benefitLabel(reward)}',
           style: const TextStyle(fontSize: 11.5),
         ),
         trailing: Row(
@@ -310,25 +256,10 @@ class _RewardListScreenState extends State<RewardListScreen> {
               reward.active ? S.t(context, 'Aktif') : S.t(context, 'Nonaktif'),
               tone: toneForRewardActive(reward.active),
             ),
-            PopupMenuButton<String>(
-              tooltip: S.t(context, 'Aksi reward'),
-              onSelected: (value) {
-                if (value == 'edit') {
-                  _openEditDialog(reward);
-                } else if (value == 'redeem') {
-                  _openRedeemDialog(reward);
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'redeem',
-                  child: Text(S.t(context, 'Redeem')),
-                ),
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Text(S.t(context, 'Ubah')),
-                ),
-              ],
+            const SizedBox(width: AppSpacing.xs),
+            FilledButton.tonal(
+              onPressed: () => _openRedeemDialog(reward),
+              child: Text(S.t(context, 'Redeem')),
             ),
           ],
         ),
@@ -338,186 +269,8 @@ class _RewardListScreenState extends State<RewardListScreen> {
   }
 }
 
-/// Form tambah/ubah reward (POST /loyalty-rewards, PUT /loyalty-rewards/{id}).
-class _RewardFormDialog extends StatefulWidget {
-  final LoyaltyReward? existing;
-
-  const _RewardFormDialog({this.existing});
-
-  @override
-  State<_RewardFormDialog> createState() => _RewardFormDialogState();
-}
-
-class _RewardFormDialogState extends State<_RewardFormDialog> {
-  final ApiService _api = ApiService();
-  late final TextEditingController _nameCtrl = TextEditingController(
-    text: widget.existing?.name ?? '',
-  );
-  late final TextEditingController _pointsCtrl = TextEditingController(
-    text: widget.existing == null ? '' : '${widget.existing!.pointsCost}',
-  );
-  late final TextEditingController _stockCtrl = TextEditingController(
-    text: widget.existing == null ? '' : '${widget.existing!.stock}',
-  );
-  late bool _active = widget.existing?.active ?? true;
-
-  bool _submitting = false;
-  String? _error;
-
-  bool get _isEdit => widget.existing != null;
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    _pointsCtrl.dispose();
-    _stockCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = S.tn(context, 'Nama wajib diisi.'));
-      return;
-    }
-    final points = int.tryParse(_pointsCtrl.text.trim()) ?? -1;
-    if (points < 0) {
-      setState(
-        () => _error = S.tn(context, 'Biaya poin harus angka >= 0.'),
-      );
-      return;
-    }
-    final stock = int.tryParse(_stockCtrl.text.trim()) ?? -1;
-    if (stock < 0) {
-      setState(() => _error = S.tn(context, 'Stok harus angka >= 0.'));
-      return;
-    }
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      final body = <String, dynamic>{
-        'name': name,
-        'points_cost': points,
-        'stock': stock,
-        'active': _active,
-      };
-      final dynamic response = _isEdit
-          ? await _sendPut('/loyalty-rewards/${widget.existing!.id}', body: body)
-          : await _api.post('/loyalty-rewards', body: body);
-      final data = response is Map ? response['data'] : null;
-      if (!mounted) return;
-      LoyaltyReward? result;
-      if (data is Map<String, dynamic>) {
-        result = LoyaltyReward.fromJson(data);
-      } else if (_isEdit) {
-        result = LoyaltyReward(
-          id: widget.existing!.id,
-          name: name,
-          pointsCost: points,
-          stock: stock,
-          active: _active,
-        );
-      }
-      Navigator.pop(context, result);
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _submitting = false;
-        _error = e.message;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _submitting = false;
-        _error = S.tn(context, 'Gagal menyimpan reward.');
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(
-        _isEdit ? S.t(context, 'Ubah Reward') : S.t(context, 'Tambah Reward'),
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_error != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  color: AppColors.errorSoft,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: Text(_error!, style: const TextStyle(fontSize: 12)),
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-            TextField(
-              key: const ValueKey('reward_name_field'),
-              controller: _nameCtrl,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: '${S.t(context, 'Nama')} *',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              key: const ValueKey('reward_points_field'),
-              controller: _pointsCtrl,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: '${S.t(context, 'Biaya poin')} *',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              key: const ValueKey('reward_stock_field'),
-              controller: _stockCtrl,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(labelText: S.t(context, 'Stok')),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            SwitchListTile(
-              title: Text(S.t(context, 'Aktif')),
-              value: _active,
-              onChanged: (v) => setState(() => _active = v),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.pop(context),
-          child: Text(S.t(context, 'Batal')),
-        ),
-        FilledButton(
-          key: const ValueKey('reward_save_button'),
-          onPressed: _submitting ? null : _submit,
-          child: _submitting
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : Text(S.t(context, 'Simpan')),
-        ),
-      ],
-    );
-  }
-}
-
 /// Dialog redeem: pilih customer via GET /customers?search=,
-/// lalu POST /loyalty-points/redeem {customer_id, reward_id}.
+/// lalu POST /loyalty/redeem {customer_id, reward_id}.
 class _RedeemDialog extends StatefulWidget {
   final LoyaltyReward reward;
 
@@ -596,7 +349,7 @@ class _RedeemDialogState extends State<_RedeemDialog> {
     });
     try {
       await _api.post(
-        '/loyalty-points/redeem',
+        '/loyalty/redeem',
         body: {'customer_id': _selected!.id, 'reward_id': widget.reward.id},
       );
       if (!mounted) return;
@@ -610,7 +363,7 @@ class _RedeemDialogState extends State<_RedeemDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        // 422 = saldo kurang / stok habis — tampilkan pesan server jujur.
+        // 422 = poin tidak cukup — tampilkan pesan server jujur.
         _error = e.message;
       });
     } catch (_) {
@@ -626,7 +379,7 @@ class _RedeemDialogState extends State<_RedeemDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        '${S.t(context, 'Redeem')}: ${widget.reward.name} (${widget.reward.pointsCost} ${S.t(context, 'poin')})',
+        '${S.t(context, 'Redeem')}: ${widget.reward.name} (${widget.reward.pointsRequired} ${S.t(context, 'poin')})',
       ),
       content: SizedBox(
         width: double.maxFinite,
@@ -717,7 +470,7 @@ class _RedeemDialogState extends State<_RedeemDialog> {
   }
 }
 
-/// Dialog cek saldo poin customer (GET /loyalty-points?customer_id=).
+/// Dialog cek saldo poin customer (GET /loyalty/summary?customer_id=).
 class _BalanceDialog extends StatefulWidget {
   const _BalanceDialog();
 
@@ -752,7 +505,7 @@ class _BalanceDialogState extends State<_BalanceDialog> {
     });
     try {
       final response = await _api.get(
-        '/loyalty-points',
+        '/loyalty/summary',
         query: {'customer_id': id},
       );
       final data = response is Map ? response['data'] : response;

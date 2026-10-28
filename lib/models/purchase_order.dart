@@ -24,15 +24,18 @@ class PoItem {
       productName:
           json['product_name']?.toString() ??
           (product is Map ? safeString(product['name'], '') : null),
-      qty: safeInt(json['qty'] ?? json['quantity'], 1),
-      costPrice: safeDouble(json['cost_price'] ?? json['unit_price']),
+      // Backend: `quantity` / `unit_price` (`qty` / `cost_price` lama
+      // dipertahankan sebagai fallback toleran).
+      qty: safeInt(json['quantity'] ?? json['qty'], 1),
+      costPrice: safeDouble(json['unit_price'] ?? json['cost_price']),
     );
   }
 
+  /// Kontrak backend: `quantity` + `unit_price`.
   Map<String, dynamic> toJson() => {
     'product_id': productId,
-    'qty': qty,
-    'cost_price': costPrice,
+    'quantity': qty,
+    'unit_price': costPrice,
   };
 }
 
@@ -92,23 +95,31 @@ class PurchaseOrder {
   factory PurchaseOrder.fromJson(Map<String, dynamic> json) {
     final supplier = json['supplier'];
     final rawHistory = json['history'] ?? json['status_history'];
+    // Backend mengirim `purchaseOrderItems` (nama relasi Eloquent);
+    // `items` lama dipertahankan sebagai fallback toleran.
+    final rawItems = json['purchaseOrderItems'] ?? json['items'];
     return PurchaseOrder(
       id: safeInt(json['id']),
-      number: json['number']?.toString(),
+      // Backend: `po_number` (`number` lama jadi fallback).
+      number: (json['po_number'] ?? json['number'])?.toString(),
       supplierId: safeInt(json['supplier_id']),
       supplierName:
           json['supplier_name']?.toString() ??
           (supplier is Map ? safeString(supplier['name'], '') : null),
       outletId: safeInt(json['outlet_id']),
       status: safeString(json['status'], 'draft'),
-      totalCost: safeDouble(json['total_cost'] ?? json['total']),
-      items: json['items'] is List
-          ? (json['items'] as List)
+      // Backend: `total_amount` (`total_cost`/`total` lama jadi fallback).
+      totalCost: safeDouble(
+        json['total_amount'] ?? json['total_cost'] ?? json['total'],
+      ),
+      items: rawItems is List
+          ? (rawItems)
                 .whereType<Map<String, dynamic>>()
                 .map(PoItem.fromJson)
                 .toList()
           : null,
-      note: json['note']?.toString(),
+      // Backend: `notes` (`note` lama jadi fallback).
+      note: (json['notes'] ?? json['note'])?.toString(),
       createdAt: json['created_at']?.toString(),
       history: rawHistory is List
           ? rawHistory
@@ -120,16 +131,31 @@ class PurchaseOrder {
   }
 }
 
-/// Label Bahasa Indonesia untuk status PO.
-String poStatusLabel(String status) {
+/// Status persis backend (Inggris — JANGAN ubah, backend produksi live):
+/// `draft`, `ordered`, `received`, `cancelled`.
+/// Nilai Indonesia lama (`dipesan`/`dikirim`/`diterima`) dipetakan toleran
+/// agar respons lama/cache tidak merusak UI.
+String _normalizePoStatus(String status) {
   switch (status) {
+    case 'dipesan':
+      return 'ordered';
+    case 'dikirim':
+      return 'ordered';
+    case 'diterima':
+      return 'received';
+    default:
+      return status;
+  }
+}
+
+/// Label Bahasa Indonesia untuk status PO (kunci Inggris backend).
+String poStatusLabel(String status) {
+  switch (_normalizePoStatus(status)) {
     case 'draft':
       return 'Draft';
-    case 'dipesan':
+    case 'ordered':
       return 'Dipesan';
-    case 'dikirim':
-      return 'Dikirim';
-    case 'diterima':
+    case 'received':
       return 'Diterima';
     case 'cancelled':
       return 'Dibatalkan';
@@ -139,13 +165,11 @@ String poStatusLabel(String status) {
 }
 
 BadgeTone toneForPoStatus(String status) {
-  switch (status) {
-    case 'diterima':
+  switch (_normalizePoStatus(status)) {
+    case 'received':
       return BadgeTone.success;
-    case 'dipesan':
+    case 'ordered':
       return BadgeTone.info;
-    case 'dikirim':
-      return BadgeTone.warning;
     case 'cancelled':
       return BadgeTone.error;
     case 'draft':

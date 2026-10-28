@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import '../../l10n/s.dart';
-import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
@@ -12,14 +10,6 @@ import '../../widgets/common/error_state.dart';
 import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/common/metric_card.dart';
 import '../../widgets/common/section_header.dart';
-import '../../widgets/common/status_badge.dart';
-
-class _StockRow {
-  final String name;
-  final double qty;
-  final String? extra;
-  _StockRow({required this.name, required this.qty, this.extra});
-}
 
 class _Movement {
   final String label;
@@ -34,9 +24,15 @@ class _Movement {
   });
 }
 
-/// Laporan inventori (kontrak grup 14):
-/// GET /reports/inventory?outlet_id=
-/// → {low_stock[], overstock[], opname_accuracy, total_value, movements[]}.
+/// Laporan inventori — backend nyata (produksi) TIDAK menyediakan
+/// GET /reports/inventory. Layar ini memetakan ke endpoint yang ADA:
+/// - GET /reports/stock → {inventory_value, low_stock (jumlah),
+///   out_of_stock (jumlah), outlet_scope}
+/// - GET /stock-movements?per_page= (envelope) → {id, product: {name},
+///   type: in|out, quantity, reference_type, created_at}
+///
+/// Tidak ada sumber server untuk akurasi opname maupun daftar nama
+/// produk overstock, jadi kartu tersebut diganti jumlah yang jujur.
 /// Catatan jujur: export PDF/Excel tetap via web.
 class InventoryReportScreen extends StatefulWidget {
   const InventoryReportScreen({super.key});
@@ -50,9 +46,8 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
   bool _loading = true;
   String? _error;
   double _totalValue = 0;
-  double? _opnameAccuracy;
-  List<_StockRow> _lowStock = [];
-  List<_StockRow> _overstock = [];
+  int _lowStockCount = 0;
+  int _outOfStockCount = 0;
   List<_Movement> _movements = [];
 
   @override
@@ -61,13 +56,24 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  static List<_StockRow> _parseStockRows(dynamic raw) {
+  static List<_Movement> parseMovements(dynamic raw) {
     if (raw is! List) return [];
     return raw.whereType<Map<String, dynamic>>().map((e) {
-      return _StockRow(
-        name: safeString(e['name'] ?? e['product_name'], '-'),
-        qty: safeDouble(e['qty'] ?? e['stock'] ?? e['quantity']),
-        extra: (e['sku'] ?? e['unit'])?.toString(),
+      final product = e['product'];
+      final qty = safeDouble(e['quantity'] ?? e['qty_change'] ?? e['change']);
+      final type = safeString(e['type'], '-').toLowerCase();
+      // Arus keluar (out/sale) tampil negatif agar konsisten.
+      final signed = (type == 'out' && qty > 0) ? -qty : qty;
+      return _Movement(
+        label: product is Map
+            ? safeString(product['name'], '-')
+            : safeString(
+                e['product_name'] ?? e['name'] ?? e['reference_type'],
+                '-',
+              ),
+        type: type,
+        change: signed,
+        date: safeString(e['created_at'] ?? e['date'], ''),
       );
     }).toList();
   }
@@ -78,38 +84,28 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
       _error = null;
     });
     try {
-      final outletId = context.read<AuthProvider>().currentOutletId;
-      final response = await _api.get(
-        '/reports/inventory',
-        query: {if (outletId != null) 'outlet_id': '$outletId'},
-      );
-      final data = response is Map ? response['data'] : null;
-      final m = data is Map<String, dynamic> ? data : <String, dynamic>{};
-      final movRaw = m['movements'];
+      // GET /reports/stock tidak menerima outlet_id (scope dari token).
+      final results = await Future.wait([
+        _api.get('/reports/stock'),
+        _api.get('/stock-movements', query: {'per_page': '15'}),
+      ]);
+      final stockData = results[0] is Map
+          ? (results[0] as Map)['data']
+          : null;
+      final stock = stockData is Map<String, dynamic>
+          ? stockData
+          : <String, dynamic>{};
+      final movRaw = results[1] is Map
+          ? (results[1] as Map)['data']
+          : results[1];
       if (!mounted) return;
       setState(() {
-        _totalValue = safeDouble(m['total_value']);
-        _opnameAccuracy = m['opname_accuracy'] == null
-            ? null
-            : safeDouble(m['opname_accuracy']);
-        _lowStock = _parseStockRows(m['low_stock']);
-        _overstock = _parseStockRows(m['overstock']);
-        _movements = movRaw is List
-            ? movRaw.whereType<Map<String, dynamic>>().map((e) {
-                return _Movement(
-                  label: safeString(
-                    e['product_name'] ?? e['name'] ?? e['reference_type'],
-                    '-',
-                  ),
-                  type: safeString(e['type'], '-'),
-                  change: safeDouble(e['qty_change'] ?? e['change']),
-                  date: safeString(
-                    e['created_at'] ?? e['date'],
-                    '',
-                  ),
-                );
-              }).toList()
-            : [];
+        _totalValue = safeDouble(
+          stock['inventory_value'] ?? stock['total_value'],
+        );
+        _lowStockCount = safeInt(stock['low_stock']);
+        _outOfStockCount = safeInt(stock['out_of_stock']);
+        _movements = parseMovements(movRaw);
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -152,7 +148,6 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
       );
     }
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
-    final theme = Theme.of(context);
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -165,117 +160,52 @@ class _InventoryReportScreenState extends State<InventoryReportScreen> {
           AppSpacing.xl,
         ),
         children: [
+          MetricCard(
+            label: S.t(context, 'Nilai Stok'),
+            value: Fmt.rupiah(_totalValue),
+            icon: Icons.inventory_2_outlined,
+            color: AppColors.primary,
+            caption: S.t(
+              context,
+              'Angka dihitung server dari seluruh katalog aktif.',
+            ),
+            compact: true,
+          ),
+          const SizedBox(height: AppSpacing.md),
           Row(
             children: [
               Expanded(
                 child: MetricCard(
-                  label: S.t(context, 'Nilai Stok'),
-                  value: Fmt.rupiah(_totalValue),
-                  icon: Icons.inventory_2_outlined,
-                  color: AppColors.primary,
+                  label: S.t(context, 'Stok Menipis'),
+                  value: '$_lowStockCount',
+                  icon: Icons.warning_amber_rounded,
+                  color: _lowStockCount > 0
+                      ? AppColors.warning
+                      : AppColors.success,
+                  caption: S.t(context, 'produk'),
                   compact: true,
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: MetricCard(
-                  label: S.t(context, 'Akurasi Opname'),
-                  value: _opnameAccuracy == null
-                      ? '-'
-                      : '${_opnameAccuracy!.toStringAsFixed(1)}%',
-                  icon: Icons.fact_check_outlined,
-                  color: AppColors.success,
-                  caption: _opnameAccuracy == null
-                      ? S.t(context, 'Belum ada opname')
-                      : null,
+                  label: S.t(context, 'Stok Habis'),
+                  value: '$_outOfStockCount',
+                  icon: Icons.remove_shopping_cart_outlined,
+                  color: _outOfStockCount > 0
+                      ? AppColors.error
+                      : AppColors.success,
+                  caption: S.t(context, 'produk'),
                   compact: true,
                 ),
               ),
             ],
           ),
-          SectionHeader(S.t(context, 'Stok Menipis')),
-          if (_lowStock.isEmpty)
-            Text(
-              S.t(context, 'Tidak ada produk stok menipis.'),
-              style: theme.textTheme.bodySmall,
-            )
-          else
-            Card(
-              child: Column(
-                children: [
-                  for (final s in _lowStock)
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(
-                        Icons.warning_amber_rounded,
-                        size: 18,
-                        color: Color(0xFFB45309),
-                      ),
-                      title: Text(
-                        s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: s.extra == null
-                          ? null
-                          : Text(
-                              s.extra!,
-                              style: const TextStyle(fontSize: 11.5),
-                            ),
-                      trailing: StatusBadge(
-                        Fmt.thousand(s.qty),
-                        tone: BadgeTone.warning,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          SectionHeader(S.t(context, 'Stok Berlebih')),
-          if (_overstock.isEmpty)
-            Text(
-              S.t(context, 'Tidak ada produk stok berlebih.'),
-              style: theme.textTheme.bodySmall,
-            )
-          else
-            Card(
-              child: Column(
-                children: [
-                  for (final s in _overstock)
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(
-                        Icons.inventory_outlined,
-                        size: 18,
-                      ),
-                      title: Text(
-                        s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      trailing: Text(
-                        Fmt.thousand(s.qty),
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
           SectionHeader(S.t(context, 'Mutasi Terakhir')),
           if (_movements.isEmpty)
             Text(
               S.t(context, 'Belum ada mutasi tercatat.'),
-              style: theme.textTheme.bodySmall,
+              style: Theme.of(context).textTheme.bodySmall,
             )
           else
             Card(

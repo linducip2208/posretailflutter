@@ -56,6 +56,9 @@ dev_dependencies:
     sdk: flutter
   # Driver SQLite FFI untuk unit test offline sync (flutter test di desktop).
   sqflite_common_ffi: ^2.3.0
+  # Fake secure storage resmi untuk widget test PUT/DELETE
+  # (TestFlutterSecureStoragePlatform).
+  flutter_secure_storage_platform_interface: ^2.1.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

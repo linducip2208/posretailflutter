@@ -117,9 +117,11 @@ class _HeldOrderScreenState extends State<HeldOrderScreen> {
       _error = null;
     });
     try {
+      // Backend: GET /held-carts (hanya per_page; scope outlet + user
+      // diambil dari token, bukan query).
       final response = await _api.get(
-        '/held-orders',
-        query: {'outlet_id': '$outletId'},
+        '/held-carts',
+        query: {'per_page': '50'},
       );
       final data = response is Map ? response['data'] : response;
       if (!mounted) return;
@@ -181,11 +183,19 @@ class _HeldOrderScreenState extends State<HeldOrderScreen> {
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
-      await _api.post('/held-orders/${h.id}/resume');
+      // Backend mengembalikan {data: heldCart}; tanpa integrasi POS di
+      // luar cakupan — cukup sukses + instruksi buka kembali di kasir.
+      final response = await _api.post('/held-carts/${h.id}/resume');
+      final data = response is Map ? response['data'] : null;
+      final resumed = data is Map<String, dynamic>
+          ? HeldOrder.fromJson(data)
+          : h;
       if (!mounted) return;
       showAppSnackbar(
         context,
-        S.tn(context, 'Transaksi dilanjutkan.'),
+        S.tn(context, 'Transaksi dilanjutkan ({count} item). Buka kembali di kasir.', {
+          'count': '${resumed.itemCount}',
+        }),
         type: SnackType.success,
       );
       await _refresh();
@@ -219,7 +229,7 @@ class _HeldOrderScreenState extends State<HeldOrderScreen> {
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
-      await _sendDelete('/held-orders/${h.id}');
+      await _sendDelete('/held-carts/${h.id}');
       if (!mounted) return;
       showAppSnackbar(
         context,
@@ -307,7 +317,6 @@ class _HeldOrderScreenState extends State<HeldOrderScreen> {
           [
             if (h.itemCount > 0) '${h.itemCount} item',
             Fmt.dateTime(h.createdAt),
-            '${S.tn(context, 'Kedaluwarsa')}: ${Fmt.dateTime(h.expiresAt)}',
           ].join(' · '),
           style: const TextStyle(fontSize: 11.5),
           maxLines: 2,
@@ -337,7 +346,9 @@ class _HeldOrderScreenState extends State<HeldOrderScreen> {
   }
 }
 
-/// Dialog buat hold: label + catatan cart sederhana → POST /held-orders.
+/// Dialog buat hold: label opsional + baris item sederhana
+/// → POST /held-carts {outlet_id, label?, items[]}.
+/// Backend mewajibkan items (min 1); label opsional.
 class _HoldFormDialog extends StatefulWidget {
   final int outletId;
 
@@ -347,24 +358,37 @@ class _HoldFormDialog extends StatefulWidget {
   State<_HoldFormDialog> createState() => _HoldFormDialogState();
 }
 
+class _DraftHoldItem {
+  int productId;
+  int qty;
+
+  _DraftHoldItem({required this.productId, required this.qty});
+}
+
 class _HoldFormDialogState extends State<_HoldFormDialog> {
   final ApiService _api = ApiService();
   final _labelCtrl = TextEditingController();
-  final _noteCtrl = TextEditingController();
+  final List<_DraftHoldItem> _items = [
+    _DraftHoldItem(productId: 0, qty: 1),
+  ];
   bool _submitting = false;
   String? _error;
 
   @override
   void dispose() {
     _labelCtrl.dispose();
-    _noteCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    final label = _labelCtrl.text.trim();
-    if (label.isEmpty) {
-      setState(() => _error = S.tn(context, 'Label wajib diisi.'));
+    final items = _items
+        .where((e) => e.productId > 0 && e.qty > 0)
+        .map((e) => {'product_id': e.productId, 'qty': e.qty})
+        .toList();
+    if (items.isEmpty) {
+      setState(
+        () => _error = S.tn(context, 'Tambahkan minimal satu item valid.'),
+      );
       return;
     }
     setState(() {
@@ -372,16 +396,13 @@ class _HoldFormDialogState extends State<_HoldFormDialog> {
       _error = null;
     });
     try {
+      final label = _labelCtrl.text.trim();
       await _api.post(
-        '/held-orders',
+        '/held-carts',
         body: {
           'outlet_id': widget.outletId,
-          'label': label,
-          'cart': {
-            'items': [],
-            if (_noteCtrl.text.trim().isNotEmpty)
-              'note': _noteCtrl.text.trim(),
-          },
+          if (label.isNotEmpty) 'label': label,
+          'items': items,
         },
       );
       if (!mounted) return;
@@ -405,38 +426,102 @@ class _HoldFormDialogState extends State<_HoldFormDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(S.t(context, 'Tahan Transaksi')),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_error != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  color: AppColors.errorSoft,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_error != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: AppColors.errorSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: Text(_error!, style: const TextStyle(fontSize: 12)),
                 ),
-                child: Text(_error!, style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: AppSpacing.md),
+              ],
+              TextField(
+                controller: _labelCtrl,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: S.t(context, 'Label (opsional)'),
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
+              Text(
+                S.t(context, 'Item keranjang'),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              ..._items.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final item = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          key: ValueKey('hold_product_$idx'),
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: S.t(context, 'ID Produk'),
+                            isDense: true,
+                          ),
+                          controller: TextEditingController(
+                            text: item.productId == 0
+                                ? ''
+                                : '${item.productId}',
+                          ),
+                          onChanged: (v) =>
+                              item.productId = int.tryParse(v.trim()) ?? 0,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          key: ValueKey('hold_qty_$idx'),
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: S.t(context, 'Qty'),
+                            isDense: true,
+                          ),
+                          controller: TextEditingController(
+                            text: '${item.qty}',
+                          ),
+                          onChanged: (v) =>
+                              item.qty = int.tryParse(v.trim()) ?? 0,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 20),
+                        onPressed: _items.length <= 1
+                            ? null
+                            : () => setState(() => _items.removeAt(idx)),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: () => setState(
+                  () => _items.add(_DraftHoldItem(productId: 0, qty: 1)),
+                ),
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(S.t(context, 'Tambah item')),
+              ),
             ],
-            TextField(
-              controller: _labelCtrl,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: '${S.t(context, 'Label')} *',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _noteCtrl,
-              maxLines: 2,
-              decoration: InputDecoration(
-                labelText: S.t(context, 'Catatan keranjang (opsional)'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
       actions: [

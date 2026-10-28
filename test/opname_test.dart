@@ -18,26 +18,27 @@ Widget _wrap(Widget child) {
   );
 }
 
-Map<String, dynamic> _opnameJson({String status = 'counted'}) => {
+Map<String, dynamic> _opnameJson({String status = 'pending'}) => {
   'id': 1,
+  'opname_number': 'SO-20261020-0001',
   'outlet_id': 1,
   'status': status,
-  'note': 'Opname mingguan',
+  'notes': 'Opname mingguan',
   'created_at': '2026-10-20T10:00:00Z',
-  'items': [
+  'stockOpnameItems': [
     {
       'product_id': 3,
       'product_name': 'Gula 1kg',
-      'system_qty': 10,
-      'physical_qty': 8,
-      'diff': -2,
+      'system_stock': 10,
+      'actual_stock': 8,
+      'difference': -2,
     },
     {
       'product_id': 4,
       'product_name': 'Kopi 200g',
-      'system_qty': 5,
-      'physical_qty': 7,
-      'diff': 2,
+      'system_stock': 5,
+      'actual_stock': 7,
+      'difference': 2,
     },
   ],
 };
@@ -73,7 +74,7 @@ MockClient _detailClient() {
     if (request.method == 'POST' && path.endsWith('/approve')) {
       approved = true;
       return http.Response(
-        jsonEncode({'data': _opnameJson(status: 'approved')}),
+        jsonEncode({'data': _opnameJson(status: 'completed')}),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -81,7 +82,7 @@ MockClient _detailClient() {
     if (request.method == 'GET' && path.endsWith('/stock-opnames/1')) {
       return http.Response(
         jsonEncode({
-          'data': _opnameJson(status: approved ? 'approved' : 'counted'),
+          'data': _opnameJson(status: approved ? 'completed' : 'pending'),
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -104,8 +105,8 @@ void main() {
     await tester.pumpWidget(_wrap(const OpnameListScreen(outletId: 1)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Opname #1'), findsOneWidget);
-    expect(find.text('Dihitung'), findsWidgets);
+    expect(find.text('SO-20261020-0001'), findsOneWidget);
+    expect(find.text('Menunggu'), findsWidgets);
   });
 
   testWidgets('opname 404 → error jujur + tombol retry', (tester) async {
@@ -124,7 +125,7 @@ void main() {
     await tester.pumpWidget(_wrap(const OpnameDetailScreen(opnameId: 1)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Opname #1'), findsWidgets);
+    expect(find.text('SO-20261020-0001'), findsWidgets);
     expect(find.text('Setujui & Koreksi Stok'), findsOneWidget);
 
     await tester.tap(find.text('Setujui & Koreksi Stok'));
@@ -138,6 +139,6 @@ void main() {
       find.text('Opname disetujui. Stok dikoreksi.'),
       findsOneWidget,
     );
-    expect(find.text('Disetujui'), findsWidgets);
+    expect(find.text('Selesai'), findsWidgets);
   });
 }

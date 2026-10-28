@@ -22,25 +22,24 @@ Widget _wrap(Widget child) {
   );
 }
 
+/// Fixture sesuai kontrak backend live: `type=in|out`, `quantity`,
+/// `reference_type`, `reference_id`, `notes`.
 Map<String, dynamic> _movement({
   required int id,
   required String name,
   required String type,
-  required num before,
-  required num after,
-  required num change,
+  required num qty,
 }) {
   return {
     'id': id,
     'product_id': id,
-    'product_name': name,
+    'product': {'name': name},
     'outlet_id': 1,
     'type': type,
-    'qty_before': before,
-    'qty_after': after,
-    'qty_change': change,
-    'reference_type': 'purchase_order',
+    'quantity': qty,
+    'reference_type': type == 'in' ? 'purchase' : 'transfer',
     'reference_id': 7,
+    'notes': type == 'in' ? 'Terima PO #7' : 'Transfer keluar #STF-1',
     'created_at': '2026-10-20T10:00:00Z',
   };
 }
@@ -51,22 +50,8 @@ MockClient _listClient() {
       return http.Response(
         jsonEncode({
           'data': [
-            _movement(
-              id: 1,
-              name: 'Kopi Susu',
-              type: 'purchase',
-              before: 10,
-              after: 15,
-              change: 5,
-            ),
-            _movement(
-              id: 2,
-              name: 'Roti Bakar',
-              type: 'sale',
-              before: 20,
-              after: 17,
-              change: -3,
-            ),
+            _movement(id: 1, name: 'Kopi Susu', type: 'in', qty: 5),
+            _movement(id: 2, name: 'Roti Bakar', type: 'out', qty: 3),
           ],
           'meta': {'total': 2, 'last_page': 1},
         }),
@@ -93,12 +78,9 @@ void main() {
 
     expect(find.text('Kopi Susu'), findsOneWidget);
     expect(find.text('Roti Bakar'), findsOneWidget);
-    // Label Indonesia per type.
-    expect(find.text('Pembelian'), findsOneWidget);
-    expect(find.text('Penjualan'), findsOneWidget);
-    // Rentang sebelum → sesudah.
-    expect(find.textContaining('10 → 15'), findsOneWidget);
-    expect(find.textContaining('20 → 17'), findsOneWidget);
+    // Label Indonesia per type backend (in/out).
+    expect(find.text('Masuk'), findsOneWidget);
+    expect(find.text('Keluar'), findsOneWidget);
 
     final plus = tester.widget<Text>(find.text('+5'));
     expect(plus.style?.color, AppColors.success);
@@ -120,16 +102,7 @@ void main() {
         }
         return http.Response(
           jsonEncode({
-            'data': [
-              _movement(
-                id: 1,
-                name: 'Kopi Susu',
-                type: 'purchase',
-                before: 10,
-                after: 15,
-                change: 5,
-              ),
-            ],
+            'data': [_movement(id: 1, name: 'Kopi Susu', type: 'in', qty: 5)],
             'meta': {'total': 1, 'last_page': 1},
           }),
           200,

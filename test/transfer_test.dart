@@ -18,17 +18,18 @@ Widget _wrap(Widget child) {
   );
 }
 
-Map<String, dynamic> _transferJson({String status = 'dikirim'}) => {
+Map<String, dynamic> _transferJson({String status = 'sent'}) => {
   'id': 1,
+  'transfer_number': 'STF-20261020-0001',
   'from_outlet_id': 1,
   'to_outlet_id': 2,
-  'from_name': 'Outlet Pusat',
-  'to_name': 'Outlet Cabang',
+  'fromOutlet': {'name': 'Outlet Pusat'},
+  'toOutlet': {'name': 'Outlet Cabang'},
   'status': status,
-  'note': 'Restock',
+  'notes': 'Restock',
   'created_at': '2026-10-20T10:00:00Z',
-  'items': [
-    {'product_id': 3, 'product_name': 'Gula 1kg', 'qty': 10},
+  'stockTransferItems': [
+    {'product_id': 3, 'product_name': 'Gula 1kg', 'quantity': 10},
   ],
 };
 
@@ -63,7 +64,7 @@ MockClient _detailClient() {
     if (request.method == 'POST' && path.endsWith('/receive')) {
       received = true;
       return http.Response(
-        jsonEncode({'data': _transferJson(status: 'diterima')}),
+        jsonEncode({'data': _transferJson(status: 'received')}),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -71,7 +72,7 @@ MockClient _detailClient() {
     if (request.method == 'GET' && path.endsWith('/stock-transfers/1')) {
       return http.Response(
         jsonEncode({
-          'data': _transferJson(status: received ? 'diterima' : 'dikirim'),
+          'data': _transferJson(status: received ? 'received' : 'sent'),
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -94,7 +95,7 @@ void main() {
     await tester.pumpWidget(_wrap(const TransferListScreen(outletId: 1)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Transfer #1'), findsOneWidget);
+    expect(find.text('STF-20261020-0001'), findsOneWidget);
     expect(find.text('Dikirim'), findsWidgets);
   });
 
@@ -114,7 +115,7 @@ void main() {
     await tester.pumpWidget(_wrap(const TransferDetailScreen(transferId: 1)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Transfer #1'), findsWidgets);
+    expect(find.text('STF-20261020-0001'), findsWidgets);
     expect(find.text('Terima Barang'), findsOneWidget);
 
     await tester.tap(find.text('Terima Barang'));

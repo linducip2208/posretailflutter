@@ -25,9 +25,13 @@ class _TrendPoint {
   _TrendPoint({required this.date, required this.total});
 }
 
-/// Laporan pembelian (kontrak grup 14):
-/// GET /reports/purchases?start_date=&end_date=&outlet_id=
-/// → {total_cost, po_count, outstanding_po, top_suppliers[], trend[]}.
+/// Laporan pembelian — coba endpoint server dulu:
+/// GET /reports/purchases?start_date=&end_date=(&outlet_id=) →
+/// {data: {start_date, end_date, total_cost, po_count, outstanding_po
+/// (draft+ordered), top_suppliers: [{name, total}], trend: [{date, total}]}}.
+/// Rentang server maksimal 93 hari (422 bila lebih).
+/// Bila server 404 (endpoint belum deploy) → fallback jujur ke agregasi
+/// client-side dari GET /purchase-orders + badge "mode lokal".
 /// Catatan jujur: export PDF/Excel tetap via web.
 class PurchaseReportScreen extends StatefulWidget {
   const PurchaseReportScreen({super.key});
@@ -43,6 +47,8 @@ class _PurchaseReportScreenState extends State<PurchaseReportScreen> {
 
   bool _loading = true;
   String? _error;
+  bool _truncated = false;
+  bool _serverMode = false;
   double _totalCost = 0;
   int _poCount = 0;
   int _outstandingPo = 0;
@@ -81,14 +87,38 @@ class _PurchaseReportScreenState extends State<PurchaseReportScreen> {
     }
   }
 
+  /// Status PO yang dianggap belum selesai. Backend memakai
+  /// draft → ordered/sent → received (+ cancelled).
+  static bool _isOutstanding(String status) {
+    switch (status.toLowerCase()) {
+      case 'received':
+      case 'cancelled':
+      case 'canceled':
+        return false;
+      default:
+        return true;
+    }
+  }
+
+  static DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;
+    try {
+      return DateTime.parse(v.toString()).toLocal();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _load() async {
+    final range = _range();
+    final outletId = context.read<AuthProvider>().currentOutletId;
+    final noName = S.tn(context, 'Tanpa nama');
+    final loadFail = S.tn(context, 'Gagal memuat laporan pembelian.');
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final range = _range();
-      final outletId = context.read<AuthProvider>().currentOutletId;
       final response = await _api.get(
         '/reports/purchases',
         query: {
@@ -98,33 +128,141 @@ class _PurchaseReportScreenState extends State<PurchaseReportScreen> {
         },
       );
       final data = response is Map ? response['data'] : null;
-      final m = data is Map<String, dynamic> ? data : <String, dynamic>{};
-      final suppliersRaw = m['top_suppliers'];
-      final trendRaw = m['trend'];
+      if (data is! Map<String, dynamic>) {
+        throw ApiException(statusCode: 500, message: loadFail);
+      }
+      final rawSuppliers = data['top_suppliers'];
+      final suppliers = <_SupplierStat>[];
+      if (rawSuppliers is List) {
+        for (final e in rawSuppliers.whereType<Map>()) {
+          suppliers.add(
+            _SupplierStat(
+              name: safeString(e['name'], noName),
+              total: safeDouble(e['total']),
+            ),
+          );
+        }
+      }
+      final rawTrend = data['trend'];
+      final trend = <_TrendPoint>[];
+      if (rawTrend is List) {
+        for (final e in rawTrend.whereType<Map>()) {
+          final d = e['date']?.toString() ?? '';
+          if (d.isEmpty) continue;
+          trend.add(_TrendPoint(date: d, total: safeDouble(e['total'])));
+        }
+      }
+      trend.sort((a, b) => a.date.compareTo(b.date));
       if (!mounted) return;
       setState(() {
-        _totalCost = safeDouble(m['total_cost']);
-        _poCount = safeInt(m['po_count']);
-        _outstandingPo = safeInt(m['outstanding_po']);
-        _topSuppliers = suppliersRaw is List
-            ? suppliersRaw.whereType<Map<String, dynamic>>().map((e) {
-                return _SupplierStat(
-                  name: safeString(
-                    e['name'] ?? e['supplier_name'],
-                    S.tn(context, 'Tanpa nama'),
-                  ),
-                  total: safeDouble(e['total'] ?? e['total_cost']),
-                );
-              }).toList()
-            : [];
-        _trend = trendRaw is List
-            ? trendRaw.whereType<Map<String, dynamic>>().map((e) {
-                return _TrendPoint(
-                  date: safeString(e['date']),
-                  total: safeDouble(e['total'] ?? e['total_cost']),
-                );
-              }).toList()
-            : [];
+        _totalCost = safeDouble(data['total_cost']);
+        _poCount = safeInt(data['po_count']);
+        _outstandingPo = safeInt(data['outstanding_po']);
+        _topSuppliers = suppliers;
+        _trend = trend;
+        _truncated = false;
+        _serverMode = true;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      // Endpoint belum deploy di server → fallback lokal yang jujur.
+      if (e.statusCode == 404) {
+        await _loadLocal();
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = S.tn(context, 'Gagal memuat laporan pembelian.');
+      });
+    }
+  }
+
+  /// Fallback client-side (dipakai bila GET /reports/purchases 404):
+  /// agregasi max 100 PO terbaru lalu disaring rentang tanggal.
+  Future<void> _loadLocal() async {
+    final noName = S.tn(context, 'Tanpa nama');
+    final range = _range();
+    final outletId = context.read<AuthProvider>().currentOutletId;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final response = await _api.get(
+        '/purchase-orders',
+        query: {
+          'per_page': '100',
+          if (outletId != null) 'outlet_id': '$outletId',
+        },
+      );
+      final raw = response is Map ? response['data'] : response;
+      final rows = raw is List
+          ? raw.whereType<Map<String, dynamic>>().toList()
+          : <Map<String, dynamic>>[];
+      final start = DateTime(
+        range.start.year,
+        range.start.month,
+        range.start.day,
+      );
+      final end = DateTime(
+        range.end.year,
+        range.end.month,
+        range.end.day,
+        23,
+        59,
+        59,
+      );
+      final inRange = rows.where((po) {
+        final d = _parseDate(po['created_at']);
+        if (d == null) return true;
+        return !d.isBefore(start) && !d.isAfter(end);
+      }).toList();
+
+      double total = 0;
+      int outstanding = 0;
+      final bySupplier = <String, double>{};
+      final byDay = <String, double>{};
+      for (final po in inRange) {
+        final amount = safeDouble(po['total_amount']);
+        total += amount;
+        final status = safeString(po['status'], 'draft');
+        if (_isOutstanding(status)) outstanding++;
+        final supplier = po['supplier'];
+        final name = supplier is Map
+            ? safeString(supplier['name'], noName)
+            : noName;
+        bySupplier[name] = (bySupplier[name] ?? 0) + amount;
+        final d = _parseDate(po['created_at']);
+        if (d != null) {
+          final key = Fmt.dateForApi(d);
+          byDay[key] = (byDay[key] ?? 0) + amount;
+        }
+      }
+      final suppliers = bySupplier.entries
+          .map((e) => _SupplierStat(name: e.key, total: e.value))
+          .toList()
+        ..sort((a, b) => b.total.compareTo(a.total));
+      final trend = byDay.entries
+          .map((e) => _TrendPoint(date: e.key, total: e.value))
+          .toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+
+      if (!mounted) return;
+      setState(() {
+        _totalCost = total;
+        _poCount = inRange.length;
+        _outstandingPo = outstanding;
+        _topSuppliers = suppliers.take(10).toList();
+        _trend = trend;
+        _truncated = rows.length >= 100;
+        _serverMode = false;
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -239,6 +377,46 @@ class _PurchaseReportScreenState extends State<PurchaseReportScreen> {
           AppSpacing.xl,
         ),
         children: [
+          if (!_serverMode)
+            Container(
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.warningSoft,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off_outlined, size: 18),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      S.t(
+                        context,
+                        'Mode lokal (server belum tersedia).',
+                      ),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_truncated)
+            Container(
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.warningSoft,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Text(
+                S.t(
+                  context,
+                  'Dihitung dari 100 PO terbaru pada outlet ini.',
+                ),
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
           Row(
             children: [
               Expanded(
@@ -270,7 +448,9 @@ class _PurchaseReportScreenState extends State<PurchaseReportScreen> {
             color: _outstandingPo > 0
                 ? AppColors.warning
                 : AppColors.success,
-            caption: S.t(context, 'Draft + dipesan + dikirim'),
+            caption: _serverMode
+                ? S.t(context, 'Draft + dipesan')
+                : S.t(context, 'Draft + dipesan + dikirim'),
             compact: true,
           ),
           SectionHeader(S.t(context, 'Tren Belanja Harian')),

@@ -18,8 +18,11 @@ import '../../widgets/common/error_state.dart';
 import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/common/status_badge.dart';
 
-/// PUT bahan baku belum tersedia di [ApiService], jadi update
-/// dilakukan lewat [ApiService.client] langsung (pola supplier).
+/// PUT bahan baku (`PUT /raw-materials/{id}`, validasi backend:
+/// `name?/code?/outlet_id?/unit_id?/cost_per_unit?/current_stock?/
+/// min_stock?/active?`) dilakukan lewat [_sendPut] langsung karena
+/// [ApiService] hanya menyediakan GET/POST. 404 berarti server lama yang
+/// belum menyediakan endpoint ini — dilaporkan jujur.
 Future<dynamic> _sendPut(String path, Map<String, dynamic> body) async {
   String? token;
   try {
@@ -231,7 +234,10 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
       if (!mounted) return;
       setState(() {
         _loadingRecipe = false;
-        // 404 = belum ada resep: anggap kosong agar bisa dibuat baru.
+        // Backend menjawab 404 bila resep belum ada untuk produk ini:
+        // tampilkan resep kosong agar pengguna bisa buat baru. Bila
+        // server lama yang belum punya endpoint resep, simpan nanti
+        // akan 404 dan dilaporkan jujur di dialog editor.
         if (e.statusCode == 404) {
           _recipe = Recipe(
             productId: _asId(_selectedProduct?['id']),
@@ -575,7 +581,13 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
       v == v.toInt() ? v.toInt().toString() : v.toString();
 }
 
-/// Form tambah/ubah bahan baku (POST /raw-materials, PUT /raw-materials/{id}).
+/// Form tambah/ubah bahan baku.
+///
+/// POST /raw-materials mewajibkan `{name, outlet_id}` plus opsional
+/// `{code, unit_id, cost_per_unit, current_stock, min_stock}`.
+/// Mode ubah memakai `PUT /raw-materials/{id}` (validasi backend:
+/// `name?/code?/outlet_id?/unit_id?/cost_per_unit?/current_stock?/
+/// min_stock?/active?`); 404 berarti server lama — dilaporkan jujur.
 class _MaterialFormDialog extends StatefulWidget {
   final RawMaterial? existing;
 
@@ -585,13 +597,27 @@ class _MaterialFormDialog extends StatefulWidget {
   State<_MaterialFormDialog> createState() => _MaterialFormDialogState();
 }
 
+class _OutletChoice {
+  final int id;
+  final String name;
+
+  _OutletChoice({required this.id, required this.name});
+}
+
+class _UnitChoice {
+  final int id;
+  final String name;
+
+  _UnitChoice({required this.id, required this.name});
+}
+
 class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   final ApiService _api = ApiService();
   late final TextEditingController _nameCtrl = TextEditingController(
     text: widget.existing?.name ?? '',
   );
-  late final TextEditingController _unitCtrl = TextEditingController(
-    text: widget.existing?.unit ?? '',
+  late final TextEditingController _codeCtrl = TextEditingController(
+    text: widget.existing?.code ?? '',
   );
   late final TextEditingController _stockCtrl = TextEditingController(
     text: widget.existing == null ? '' : _num(widget.existing!.stock),
@@ -603,6 +629,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     text: widget.existing == null ? '' : _num(widget.existing!.costPerUnit),
   );
 
+  List<_OutletChoice> _outlets = [];
+  List<_UnitChoice> _units = [];
+  bool _loadingRefs = true;
+  int? _outletId;
+  int? _unitId;
+
   bool _submitting = false;
   String? _error;
 
@@ -612,9 +644,74 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   bool get _isEdit => widget.existing != null;
 
   @override
+  void initState() {
+    super.initState();
+    _outletId = widget.existing?.outletId;
+    _unitId = widget.existing?.unitId;
+    _loadRefs();
+  }
+
+  static int _choiceId(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw?.toString() ?? '') ?? 0;
+  }
+
+  Future<void> _loadRefs() async {
+    List<_OutletChoice> outlets = [];
+    List<_UnitChoice> units = [];
+    try {
+      final oRes = await _api.get('/outlets');
+      final oData = oRes is Map ? oRes['data'] : oRes;
+      if (oData is List) {
+        outlets = oData.whereType<Map<String, dynamic>>().map((m) {
+          final id = _choiceId(m['id']);
+          return _OutletChoice(
+            id: id,
+            name: (m['name']?.toString() ?? '').isEmpty
+                ? 'Outlet #$id'
+                : m['name'].toString(),
+          );
+        }).where((o) => o.id != 0).toList();
+      }
+    } catch (_) {
+      // Outlet gagal dimuat: biarkan kosong, submit akan menolak jujur.
+    }
+    try {
+      final uRes = await _api.get('/units');
+      final uData = uRes is Map ? uRes['data'] : uRes;
+      if (uData is List) {
+        units = uData.whereType<Map<String, dynamic>>().map((m) {
+          final id = _choiceId(m['id']);
+          return _UnitChoice(
+            id: id,
+            name: (m['name']?.toString() ?? '').isEmpty
+                ? 'Satuan #$id'
+                : m['name'].toString(),
+          );
+        }).where((u) => u.id != 0).toList();
+      }
+    } catch (_) {
+      // Satuan opsional: kegagalan dimuat tidak menghalangi simpan.
+    }
+    if (!mounted) return;
+    setState(() {
+      _outlets = outlets;
+      _units = units;
+      _loadingRefs = false;
+      if (_outletId != null && !outlets.any((o) => o.id == _outletId)) {
+        _outletId = null;
+      }
+      if (_unitId != null && !units.any((u) => u.id == _unitId)) {
+        _unitId = null;
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _nameCtrl.dispose();
-    _unitCtrl.dispose();
+    _codeCtrl.dispose();
     _stockCtrl.dispose();
     _minCtrl.dispose();
     _costCtrl.dispose();
@@ -627,6 +724,10 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       setState(() => _error = S.tn(context, 'Nama wajib diisi.'));
       return;
     }
+    if (_outletId == null) {
+      setState(() => _error = S.tn(context, 'Pilih outlet dulu.'));
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -634,9 +735,14 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
     try {
       final body = <String, dynamic>{
         'name': name,
-        if (_unitCtrl.text.trim().isNotEmpty) 'unit': _unitCtrl.text.trim(),
-        'stock': double.tryParse(_stockCtrl.text.trim().replaceAll(',', '.')) ?? 0,
-        'min_stock': double.tryParse(_minCtrl.text.trim().replaceAll(',', '.')) ?? 0,
+        if (_codeCtrl.text.trim().isNotEmpty)
+          'code': _codeCtrl.text.trim(),
+        'outlet_id': _outletId,
+        if (_unitId != null) 'unit_id': _unitId,
+        'current_stock':
+            double.tryParse(_stockCtrl.text.trim().replaceAll(',', '.')) ?? 0,
+        'min_stock':
+            double.tryParse(_minCtrl.text.trim().replaceAll(',', '.')) ?? 0,
         'cost_per_unit':
             double.tryParse(_costCtrl.text.trim().replaceAll(',', '.')) ?? 0,
       };
@@ -651,7 +757,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = e.message;
+        _error = e.statusCode == 404 && _isEdit
+            ? S.tn(
+                context,
+                'Server belum mendukung ubah bahan baku (404, mungkin belum diperbarui). Perubahan tidak tersimpan.',
+              )
+            : e.message;
       });
     } catch (_) {
       if (!mounted) return;
@@ -692,17 +803,68 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
               ),
             ),
             const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _unitCtrl,
-                    decoration: InputDecoration(
-                      labelText: S.t(context, 'Satuan (kg/liter/pcs)'),
-                    ),
+            if (_loadingRefs)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(AppSpacing.sm),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
+              )
+            else ...[
+              DropdownButtonFormField<int>(
+                initialValue: _outletId,
+                decoration: InputDecoration(
+                  labelText: '${S.t(context, 'Outlet')} *',
+                ),
+                items: _outlets
+                    .map(
+                      (o) => DropdownMenuItem(
+                        value: o.id,
+                        child: Text(o.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => _outletId = v),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _codeCtrl,
+                      decoration: InputDecoration(
+                        labelText: S.t(context, 'Kode (opsional)'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      initialValue: _unitId,
+                      decoration: InputDecoration(
+                        labelText: S.t(context, 'Satuan (opsional)'),
+                      ),
+                      items: _units
+                          .map(
+                            (u) => DropdownMenuItem(
+                              value: u.id,
+                              child: Text(u.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setState(() => _unitId = v),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
                 Expanded(
                   child: TextField(
                     controller: _stockCtrl,
@@ -714,11 +876,7 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: TextField(
                     controller: _minCtrl,
@@ -730,17 +888,15 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
                     ),
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: TextField(
-                    controller: _costCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: S.t(context, 'Biaya per satuan (Rp)'),
-                    ),
-                  ),
-                ),
               ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _costCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: S.t(context, 'Biaya per satuan (Rp)'),
+              ),
             ),
           ],
         ),
@@ -768,7 +924,12 @@ class _MaterialFormDialogState extends State<_MaterialFormDialog> {
   }
 }
 
-/// Editor resep: pilih bahan + qty per baris, POST /recipes.
+/// Editor resep: pilih bahan + qty per baris.
+///
+/// Kontrak backend: `GET /recipes?product_id=` → 404 bila kosong,
+/// `POST /recipes {product_id, items: [{raw_material_id, quantity}]}`.
+/// 404 saat simpan berarti server lama — dilaporkan jujur dan dialog
+/// tidak ditutup.
 class _RecipeFormDialog extends StatefulWidget {
   final int productId;
   final String productName;
@@ -863,7 +1024,12 @@ class _RecipeFormDialogState extends State<_RecipeFormDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = e.message;
+        _error = e.statusCode == 404
+            ? S.tn(
+                context,
+                'Server belum menyediakan endpoint resep (404, mungkin belum diperbarui). Resep tidak tersimpan.',
+              )
+            : e.message;
       });
     } catch (_) {
       if (!mounted) return;

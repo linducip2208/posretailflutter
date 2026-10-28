@@ -28,7 +28,8 @@ class TransferListScreen extends StatefulWidget {
 }
 
 class _TransferListScreenState extends State<TransferListScreen> {
-  static const _filters = ['semua', 'draft', 'dikirim', 'diterima', 'cancelled'];
+  /// Status persis backend live: `draft` → `sent` → `received`.
+  static const _filters = ['semua', 'draft', 'sent', 'received'];
 
   final ApiService _api = ApiService();
   final ScrollController _scrollCtrl = ScrollController();
@@ -493,9 +494,10 @@ class _TransferFormDialogState extends State<_TransferFormDialog> {
           'from_outlet_id': widget.fromOutletId,
           'to_outlet_id': _toOutletId,
           'items': _items
-              .map((e) => {'product_id': e.productId, 'qty': e.qty})
+              .map((e) => {'product_id': e.productId, 'quantity': e.qty})
               .toList(),
-          if (_noteCtrl.text.trim().isNotEmpty) 'note': _noteCtrl.text.trim(),
+          if (_noteCtrl.text.trim().isNotEmpty)
+            'notes': _noteCtrl.text.trim(),
         },
       );
       if (!mounted) return;

@@ -30,7 +30,15 @@ class PurchaseOrderListScreen extends StatefulWidget {
 }
 
 class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
-  static const _filters = ['semua', 'draft', 'dipesan', 'dikirim', 'diterima'];
+  /// Kunci status persis backend (`draft`/`ordered`/`received`/`cancelled`);
+  /// label Indonesia dirender via [poStatusLabel].
+  static const _filters = [
+    'semua',
+    'draft',
+    'ordered',
+    'received',
+    'cancelled',
+  ];
 
   final ApiService _api = ApiService();
   final TextEditingController _searchCtrl = TextEditingController();
@@ -81,11 +89,13 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
   void _onSearchChanged(String _) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
-      if (mounted) setState(() {});
+      if (mounted) _refresh();
     });
   }
 
   /// Item yang lolos filter status + pencarian lokal (nomor/supplier).
+  /// Pencarian nomor PO juga dikirim ke server (`search` → `po_number`);
+  /// filter nama supplier hanya bisa lokal karena backend tidak mendukungnya.
   List<PurchaseOrder> get _visible {
     final q = _searchCtrl.text.trim().toLowerCase();
     return _orders.where((o) {
@@ -95,6 +105,16 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
           (o.supplierName?.toLowerCase().contains(q) ?? false);
     }).toList();
   }
+
+  Map<String, String?> _listQuery(String outletId, String page) => {
+    'outlet_id': outletId,
+    'per_page': '50',
+    'page': page,
+    if (_statusFilter != 'semua') 'status': _statusFilter,
+    // Backend hanya mencari di `po_number`; kirim apa adanya, mis.
+    // "PO-2026" — filter nama supplier tetap ditangani lokal di [_visible].
+    if (_searchCtrl.text.trim().isNotEmpty) 'search': _searchCtrl.text.trim(),
+  };
 
   Future<void> _refresh() async {
     final outletId = _resolveOutletId();
@@ -113,12 +133,7 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
     try {
       final response = await _api.get(
         '/purchase-orders',
-        query: {
-          'outlet_id': '$outletId',
-          'per_page': '50',
-          'page': '1',
-          if (_statusFilter != 'semua') 'status': _statusFilter,
-        },
+        query: _listQuery('$outletId', '1'),
       );
       final data = response is Map ? response['data'] : null;
       final meta = response is Map ? response['meta'] : null;
@@ -158,12 +173,7 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
       final nextPage = _page + 1;
       final response = await _api.get(
         '/purchase-orders',
-        query: {
-          'outlet_id': '$outletId',
-          'per_page': '50',
-          'page': '$nextPage',
-          if (_statusFilter != 'semua') 'status': _statusFilter,
-        },
+        query: _listQuery('$outletId', '$nextPage'),
       );
       final data = response is Map ? response['data'] : null;
       if (!mounted) return;
@@ -259,7 +269,7 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
                         icon: const Icon(Icons.clear, size: 18),
                         onPressed: () {
                           _searchCtrl.clear();
-                          setState(() {});
+                          _refresh();
                         },
                       ),
               ),
@@ -590,16 +600,18 @@ class _PurchaseOrderFormDialogState extends State<_PurchaseOrderFormDialog> {
         body: {
           'supplier_id': _supplierId,
           'outlet_id': widget.outletId,
+          // Kontrak backend: `quantity` / `unit_price` / `notes`.
           'items': _items
               .map(
                 (e) => {
                   'product_id': e.productId,
-                  'qty': e.qty,
-                  'cost_price': e.costPrice,
+                  'quantity': e.qty,
+                  'unit_price': e.costPrice,
                 },
               )
               .toList(),
-          if (_noteCtrl.text.trim().isNotEmpty) 'note': _noteCtrl.text.trim(),
+          if (_noteCtrl.text.trim().isNotEmpty)
+            'notes': _noteCtrl.text.trim(),
         },
       );
       if (!mounted) return;

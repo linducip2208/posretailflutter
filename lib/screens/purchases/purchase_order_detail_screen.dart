@@ -79,26 +79,48 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     }
   }
 
-  Future<void> _doAction(String endpoint, String successMessage) async {
+  /// Kirim aksi POST ke sub-resource PO: `order` (draft → ordered, tanpa
+  /// body), `cancel` (`{reason?}` → `cancelled`), dan `receive` (→
+  /// `received`). Ketiganya ada di backend baru; 404 berarti server lama
+  /// yang belum diperbarui — diterjemahkan jujur agar bisa retry setelah
+  /// backend diupdate.
+  Future<bool> _doAction(String endpoint, String successMessage) async {
     setState(() => _busy = true);
     try {
       await _api.post('/purchase-orders/${widget.poId}/$endpoint');
-      if (!mounted) return;
+      if (!mounted) return false;
       showAppSnackbar(context, successMessage, type: SnackType.success);
       await _load();
+      return true;
     } on ApiException catch (e) {
-      if (!mounted) return;
-      showAppSnackbar(context, e.message, type: SnackType.error);
+      if (!mounted) return false;
+      showAppSnackbar(
+        context,
+        e.statusCode == 404 ? _missingEndpointMessage(endpoint) : e.message,
+        type: SnackType.error,
+      );
+      return false;
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return false;
       showAppSnackbar(
         context,
         S.tn(context, 'Aksi gagal. Coba lagi.'),
         type: SnackType.error,
       );
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Pesan jujur saat endpoint belum tersedia di server: bukan salah user,
+  /// dan aksi bisa dicoba lagi setelah backend diupdate.
+  String _missingEndpointMessage(String endpoint) {
+    final action = endpoint == 'cancel' ? 'Pembatalan' : 'Pengiriman';
+    return S.tn(
+      context,
+      '$action PO belum tersedia di server (mungkin belum diperbarui). Coba lagi nanti.',
+    );
   }
 
   Future<void> _confirmAndShip(PurchaseOrder order) async {
@@ -115,7 +137,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     );
     if (!ok || !mounted) return;
     await _doAction(
-      'ship',
+      'order',
       S.tn(context, 'Purchase order dikirim ke supplier.'),
     );
   }
@@ -124,50 +146,26 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     final ok = await confirmDialog(
       context,
       title: S.tn(context, 'Terima barang?'),
+      // Backend TIDAK menambah stok otomatis (stok & payable dicatat manual
+      // seperti alur web); receive hanya mengubah status + memposting jurnal.
       message: S.tn(
         context,
-        'Stok produk akan bertambah sesuai item PO.',
+        'Status PO menjadi Diterima dan jurnal pembelian diposting. Stok dicatat manual seperti alur web.',
       ),
       confirmLabel: S.tn(context, 'Terima'),
     );
     if (!ok || !mounted) return;
     await _doAction(
       'receive',
-      S.tn(context, 'Purchase order diterima. Stok bertambah.'),
+      S.tn(context, 'Purchase order diterima dan tercatat di jurnal.'),
     );
   }
 
   Future<void> _confirmAndCancel() async {
-    final reasonCtrl = TextEditingController();
     final reason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(S.tn(context, 'Batalkan PO?')),
-        content: TextField(
-          controller: reasonCtrl,
-          autofocus: true,
-          maxLines: 2,
-          decoration: InputDecoration(
-            labelText: S.tn(context, 'Alasan (opsional)'),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(S.tn(context, 'Batal')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, reasonCtrl.text.trim()),
-            child: Text(S.tn(context, 'Batalkan PO')),
-          ),
-        ],
-      ),
+      builder: (_) => const _CancelPoDialog(),
     );
-    reasonCtrl.dispose();
     if (reason == null || !mounted) return;
     setState(() => _busy = true);
     try {
@@ -184,9 +182,12 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       await _load();
     } on ApiException catch (e) {
       if (!mounted) return;
-      showAppSnackbar(context, e.message, type: SnackType.error);
-    } catch (_) {
-      if (!mounted) return;
+      showAppSnackbar(
+        context,
+        e.statusCode == 404 ? _missingEndpointMessage('cancel') : e.message,
+        type: SnackType.error,
+      );
+    } catch (_) {      if (!mounted) return;
       showAppSnackbar(
         context,
         S.tn(context, 'Gagal membatalkan PO.'),
@@ -404,56 +405,55 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     );
   }
 
-  /// Tombol aksi workflow sesuai status. Null bila tidak ada aksi.
+  /// Tombol aksi workflow sesuai status backend
+  /// (`draft`/`ordered`/`received`/`cancelled`). Null bila tidak ada aksi.
+  /// `order`/`receive`/`cancel` didukung backend baru; 404 dari server
+  /// lama diterjemahkan jujur oleh [_doAction]/[_confirmAndCancel].
   Widget? _buildActions(PurchaseOrder order) {
     if (_loading && _order == null) return null;
     final status = order.status;
-    final canCancel = status != 'diterima' && status != 'cancelled';
+    final isOpen = status == 'draft' || status == 'ordered';
+    final canCancel = status != 'received' && status != 'cancelled';
 
     List<Widget> buttons = [];
-    if (status == 'draft' || status == 'dipesan') {
+    if (isOpen) {
       buttons.add(
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: _busy ? null : () => _confirmAndShip(order),
-            icon: const Icon(Icons.local_shipping_outlined, size: 18),
-            label: Text(
-              status == 'draft'
-                  ? S.t(context, 'Kirim ke Supplier')
-                  : S.t(context, 'Tandai Dikirim'),
-              style: const TextStyle(fontSize: 13),
-            ),
+        FilledButton.icon(
+          onPressed: _busy ? null : () => _confirmAndShip(order),
+          icon: const Icon(Icons.local_shipping_outlined, size: 18),
+          label: Text(
+            status == 'draft'
+                ? S.t(context, 'Kirim ke Supplier')
+                : S.t(context, 'Tandai Dikirim'),
+            style: const TextStyle(fontSize: 13),
           ),
         ),
       );
-    } else if (status == 'dikirim') {
       buttons.add(
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: _busy ? null : _confirmAndReceive,
-            icon: const Icon(Icons.check_circle_outline, size: 18),
-            label: Text(
-              S.t(context, 'Terima Barang'),
-              style: const TextStyle(fontSize: 13),
-            ),
+        FilledButton.tonalIcon(
+          onPressed: _busy ? null : _confirmAndReceive,
+          icon: const Icon(Icons.check_circle_outline, size: 18),
+          label: Text(
+            S.t(context, 'Terima Barang'),
+            style: const TextStyle(fontSize: 13),
           ),
         ),
       );
+    } else if (status == 'received' || status == 'cancelled') {
+      // Terminal: tidak ada aksi.
     }
     if (canCancel) {
       buttons.add(
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _busy ? null : _confirmAndCancel,
-            icon: const Icon(
-              Icons.cancel_outlined,
-              size: 18,
-              color: AppColors.error,
-            ),
-            label: Text(
-              S.t(context, 'Batalkan'),
-              style: const TextStyle(fontSize: 13, color: AppColors.error),
-            ),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _confirmAndCancel,
+          icon: const Icon(
+            Icons.cancel_outlined,
+            size: 18,
+            color: AppColors.error,
+          ),
+          label: Text(
+            S.t(context, 'Batalkan'),
+            style: const TextStyle(fontSize: 13, color: AppColors.error),
           ),
         ),
       );
@@ -463,13 +463,17 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Row(
-          children: [
-            for (int i = 0; i < buttons.length; i++) ...[
-              if (i > 0) const SizedBox(width: AppSpacing.sm),
-              buttons[i],
-            ],
-          ],
+        child: Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: buttons
+              .map(
+                (b) => SizedBox(
+                  width: (MediaQuery.of(context).size.width - 48) / 2,
+                  child: b,
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -500,6 +504,54 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Dialog alasan pembatalan PO: controller dimiliki dialog sendiri agar
+/// tidak di-dispose saat rute dialog masih beranimasi keluar.
+class _CancelPoDialog extends StatefulWidget {
+  const _CancelPoDialog();
+
+  @override
+  State<_CancelPoDialog> createState() => _CancelPoDialogState();
+}
+
+class _CancelPoDialogState extends State<_CancelPoDialog> {
+  final _reasonCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(S.tn(context, 'Batalkan PO?')),
+      content: TextField(
+        controller: _reasonCtrl,
+        autofocus: true,
+        maxLines: 2,
+        decoration: InputDecoration(
+          labelText: S.tn(context, 'Alasan (opsional)'),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(S.tn(context, 'Batal')),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.error,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () => Navigator.pop(context, _reasonCtrl.text.trim()),
+          child: Text(S.tn(context, 'Batalkan PO')),
+        ),
+      ],
     );
   }
 }

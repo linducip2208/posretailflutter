@@ -5,6 +5,7 @@ import '../utils/safe_parse.dart';
 class Supplier {
   final int id;
   final String name;
+  final String? contactPerson;
   final String? phone;
   final String? email;
   final String? address;
@@ -18,6 +19,7 @@ class Supplier {
   Supplier({
     required this.id,
     required this.name,
+    this.contactPerson,
     this.phone,
     this.email,
     this.address,
@@ -36,8 +38,11 @@ class Supplier {
           .toList();
     }
     int? count;
+    // Backend memakai `loadCount(['purchaseOrders as po_count'])` → `po_count`.
     final dynamic countRaw =
-        json['purchase_orders_count'] ?? json['po_count'] ?? json['pos_count'];
+        json['po_count'] ??
+        json['purchase_orders_count'] ??
+        json['pos_count'];
     if (countRaw != null) {
       count = safeInt(countRaw);
     } else if (posRaw is List) {
@@ -46,6 +51,7 @@ class Supplier {
     return Supplier(
       id: safeInt(json['id']),
       name: safeString(json['name']),
+      contactPerson: _optString(json['contact_person']),
       phone: _optString(json['phone']),
       email: _optString(json['email']),
       address: _optString(json['address']),

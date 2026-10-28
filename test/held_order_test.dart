@@ -17,24 +17,24 @@ Widget _wrap(Widget child) {
   );
 }
 
+/// Bentuk backend: /held-carts, items array top-level, tanpa expires_at.
 Map<String, dynamic> _holdJson() => {
   'id': 2,
   'outlet_id': 1,
+  'user_id': 7,
+  'customer_id': null,
   'label': 'Meja 4',
-  'cart': {
-    'items': [
-      {'product_id': 1, 'qty': 2},
-    ],
-    'note': 'tambah es',
-  },
+  'items': [
+    {'product_id': 1, 'name': 'Kopi', 'price': 15000, 'qty': 2},
+  ],
   'created_at': '2026-10-26T10:00:00Z',
-  'expires_at': '2026-10-27T10:00:00Z',
+  'updated_at': '2026-10-26T10:00:00Z',
 };
 
 MockClient _listClient({int listStatus = 200}) {
   return MockClient((request) async {
     final path = request.url.path;
-    if (request.method == 'GET' && path.endsWith('/held-orders')) {
+    if (request.method == 'GET' && path.endsWith('/held-carts')) {
       if (listStatus != 200) {
         return http.Response(
           jsonEncode({'message': 'Data tidak ditemukan.'}),
@@ -75,6 +75,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Meja 4'), findsOneWidget);
+    expect(find.textContaining('2 item'), findsOneWidget);
   });
 
   testWidgets('hold 404 → error jujur + tombol retry', (tester) async {
@@ -87,7 +88,7 @@ void main() {
     expect(find.text('Coba Lagi'), findsOneWidget);
   });
 
-  testWidgets('resume sukses → snackbar', (tester) async {
+  testWidgets('resume sukses → snackbar + instruksi kasir', (tester) async {
     ApiService.client = _listClient();
 
     await tester.pumpWidget(_wrap(const HeldOrderScreen(outletId: 1)));
@@ -101,6 +102,7 @@ void main() {
     await tester.tap(find.text('Lanjutkan').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Transaksi dilanjutkan.'), findsOneWidget);
+    expect(find.textContaining('Transaksi dilanjutkan'), findsOneWidget);
+    expect(find.textContaining('Buka kembali di kasir'), findsOneWidget);
   });
 }

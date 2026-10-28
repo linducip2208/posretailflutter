@@ -23,28 +23,25 @@ Widget _wrap(Widget child) {
   );
 }
 
+/// Bentuk backend nyata:
+/// GET /attendances/today → {data: {...} | null} dengan
+/// status present|late, clock_in "HH:mm:ss".
 MockClient _okClient() {
   return MockClient((request) async {
     final path = request.url.path;
-    if (path.endsWith('/attendances')) {
+    if (path.endsWith('/attendances/today')) {
       return http.Response(
         jsonEncode({
-          'data': [
-            {
-              'id': 1,
-              'user_name': 'Budi Kasir',
-              'date': '2026-10-27',
-              'clock_in': '2026-10-27T08:05:00Z',
-              'status': 'hadir',
-            },
-            {
-              'id': 2,
-              'user_name': 'Siti Gudang',
-              'date': '2026-10-27',
-              'clock_in': '2026-10-27T09:30:00Z',
-              'status': 'terlambat',
-            },
-          ],
+          'data': {
+            'id': 1,
+            'user_id': 5,
+            'outlet_id': 1,
+            'date': '2026-10-27',
+            'clock_in': '08:05:00',
+            'clock_out': null,
+            'status': 'late',
+            'notes': null,
+          },
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -53,8 +50,48 @@ MockClient _okClient() {
     if (path.endsWith('/attendances/clock-in')) {
       return http.Response(
         jsonEncode({
-          'data': {'id': 3, 'status': 'hadir'},
+          'data': {'id': 3, 'status': 'present'},
           'message': 'Clock-in tercatat',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (path.endsWith('/attendances/clock-out')) {
+      return http.Response(
+        jsonEncode({
+          'data': {'id': 1, 'status': 'late'},
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (path.endsWith('/attendances/history')) {
+      return http.Response(
+        jsonEncode({
+          'data': [
+            {
+              'id': 2,
+              'user_id': 5,
+              'outlet_id': 1,
+              'date': '2026-10-26',
+              'clock_in': '07:55:00',
+              'clock_out': '17:02:00',
+              'status': 'present',
+              'user': {'id': 5, 'name': 'Kasir A'},
+            },
+            {
+              'id': 1,
+              'user_id': 5,
+              'outlet_id': 1,
+              'date': '2026-10-27',
+              'clock_in': '08:05:00',
+              'clock_out': null,
+              'status': 'late',
+              'user': {'id': 5, 'name': 'Kasir A'},
+            },
+          ],
+          'meta': {'current_page': 1, 'total': 2},
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -71,21 +108,99 @@ void main() {
     ApiService.client = http.Client();
   });
 
-  testWidgets('daftar kehadiran tampil + badge status', (tester) async {
+  testWidgets('absensi hari ini tampil + badge status', (tester) async {
     ApiService.client = _okClient();
 
     await tester.pumpWidget(_wrap(const AttendanceScreen()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Budi Kasir'), findsOneWidget);
-    expect(find.text('Siti Gudang'), findsOneWidget);
-    expect(find.text('Hadir'), findsOneWidget);
-    expect(find.text('Terlambat'), findsOneWidget);
+    expect(find.text('Terlambat'), findsNWidgets(2)); // kartu today + baris riwayat
+    expect(find.text('08:05'), findsOneWidget);
+  });
+
+  testWidgets('riwayat server tampil di bawah kartu today', (tester) async {
+    ApiService.client = _okClient();
+
+    await tester.pumpWidget(_wrap(const AttendanceScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Riwayat Absensi'), findsOneWidget);
+    expect(find.text('2026-10-26'), findsOneWidget);
+    expect(find.textContaining('Kasir A'), findsWidgets);
+    expect(
+      find.text('Riwayat server belum tersedia, menampilkan hari ini saja.'),
+      findsNothing,
+    );
+  });
+
+  testWidgets('riwayat 404: today-only + pesan jujur', (tester) async {
+    ApiService.client = MockClient((request) async {
+      final path = request.url.path;
+      if (path.endsWith('/attendances/history')) {
+        return http.Response(
+          jsonEncode({'message': 'Belum ada endpoint.'}),
+          404,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (path.endsWith('/attendances/today')) {
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'id': 1,
+              'user_id': 5,
+              'outlet_id': 1,
+              'date': '2026-10-27',
+              'clock_in': '08:05:00',
+              'clock_out': null,
+              'status': 'late',
+              'notes': null,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('{}', 404);
+    });
+
+    await tester.pumpWidget(_wrap(const AttendanceScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('08:05'), findsOneWidget);
+    expect(find.text('Riwayat Absensi'), findsNothing);
+    expect(
+      find.text('Riwayat server belum tersedia, menampilkan hari ini saja.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Riwayat absensi lengkap tersedia di web admin.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('clock-in sukses → snackbar sukses', (tester) async {
     SharedPreferences.setMockInitialValues({});
-    ApiService.client = _okClient();
+    ApiService.client = MockClient((request) async {
+      final path = request.url.path;
+      if (path.endsWith('/attendances/today')) {
+        return http.Response(
+          jsonEncode({'data': null}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (path.endsWith('/attendances/clock-in')) {
+        return http.Response(
+          jsonEncode({
+            'data': {'id': 3, 'status': 'present'},
+          }),
+          201,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('{}', 404);
+    });
     final auth = AuthProvider();
     await auth.selectOutlet(Outlet(id: 1, name: 'Toko A'));
 
@@ -107,10 +222,18 @@ void main() {
   });
 
   testWidgets('404 jujur + retry', (tester) async {
-    var calls = 0;
+    var todayCalls = 0;
     ApiService.client = MockClient((request) async {
-      calls++;
-      if (calls == 1) {
+      final path = request.url.path;
+      if (path.endsWith('/attendances/history')) {
+        return http.Response(
+          jsonEncode({'message': 'Belum ada endpoint.'}),
+          404,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      todayCalls++;
+      if (todayCalls == 1) {
         return http.Response(
           jsonEncode({'message': 'Belum ada endpoint.'}),
           404,
@@ -118,11 +241,7 @@ void main() {
         );
       }
       return http.Response(
-        jsonEncode({
-          'data': [
-            {'id': 1, 'user_name': 'Budi Kasir', 'status': 'izin'},
-          ],
-        }),
+        jsonEncode({'data': null}),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -135,8 +254,7 @@ void main() {
     await tester.tap(find.text('Coba Lagi'));
     await tester.pumpAndSettle();
 
-    expect(calls, 2);
-    expect(find.text('Budi Kasir'), findsOneWidget);
-    expect(find.text('Izin'), findsOneWidget);
+    expect(todayCalls, 2);
+    expect(find.text('Belum clock-in hari ini.'), findsOneWidget);
   });
 }

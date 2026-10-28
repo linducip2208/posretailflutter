@@ -13,10 +13,10 @@ import '../../widgets/common/loading_skeleton.dart';
 import '../../widgets/common/status_badge.dart';
 
 /// Riwayat mutasi stok — read-only (ditulis server dari
-/// penjualan/pembelian/transfer/opname/penyesuaian).
+/// penjualan/pembelian/transfer/opname).
 ///
-/// Sumber: `GET /stock-movements?outlet_id=&product_id=&type=`
-/// `&start_date=&end_date=&page=&per_page=`.
+/// Sumber: `GET /stock-movements?outlet_id=&product_id=&type=in|out`
+/// `&page=&per_page=`.
 class StockMovementScreen extends StatefulWidget {
   final int? productId;
 
@@ -38,9 +38,8 @@ class _StockMovementScreenState extends State<StockMovementScreen> {
   int _lastPage = 1;
   int _total = 0;
 
+  /// Filter type persis validasi backend: `in` / `out` / semua.
   String _type = 'all';
-  DateTime? _startDate;
-  DateTime? _endDate;
 
   @override
   void initState() {
@@ -67,10 +66,8 @@ class _StockMovementScreenState extends State<StockMovementScreen> {
     return {
       'outlet_id': context.read<AuthProvider>().currentOutletId?.toString(),
       'product_id': widget.productId?.toString(),
+      // Backend hanya menerima type=in|out; 'all' berarti tanpa filter.
       'type': _type == 'all' ? null : _type,
-      'start_date':
-          _startDate == null ? null : Fmt.dateForApi(_startDate!),
-      'end_date': _endDate == null ? null : Fmt.dateForApi(_endDate!),
       'page': page,
       'per_page': '50',
     };
@@ -142,42 +139,14 @@ class _StockMovementScreenState extends State<StockMovementScreen> {
     }
   }
 
-  Future<void> _pickDate({required bool isStart}) async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: (isStart ? _startDate : _endDate) ?? now,
-      firstDate: DateTime(2020),
-      lastDate: now,
-    );
-    if (picked == null || !mounted) return;
-    setState(() {
-      if (isStart) {
-        _startDate = picked;
-        if (_endDate != null && _endDate!.isBefore(picked)) {
-          _endDate = picked;
-        }
-      } else {
-        _endDate = picked;
-        if (_startDate != null && _startDate!.isAfter(picked)) {
-          _startDate = picked;
-        }
-      }
-    });
-    await _refresh();
-  }
-
   void _resetFilter() {
     setState(() {
       _type = 'all';
-      _startDate = null;
-      _endDate = null;
     });
     _refresh();
   }
 
-  bool get _hasFilter =>
-      _type != 'all' || _startDate != null || _endDate != null;
+  bool get _hasFilter => _type != 'all';
 
   static String _fmtQty(double v) =>
       v == v.toInt() ? v.toInt().toString() : v.toString();
@@ -244,40 +213,14 @@ class _StockMovementScreenState extends State<StockMovementScreen> {
             },
           ),
           const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickDate(isStart: true),
-                  icon: const Icon(Icons.calendar_today, size: 16),
-                  label: Text(
-                    _startDate == null
-                        ? S.t(context, 'Dari tanggal')
-                        : Fmt.dateForApi(_startDate!),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
+          if (_hasFilter)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _resetFilter,
+                child: Text(S.t(context, 'Reset')),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickDate(isStart: false),
-                  icon: const Icon(Icons.calendar_today, size: 16),
-                  label: Text(
-                    _endDate == null
-                        ? S.t(context, 'Sampai tanggal')
-                        : Fmt.dateForApi(_endDate!),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-              ),
-              if (_hasFilter)
-                TextButton(
-                  onPressed: _resetFilter,
-                  child: Text(S.t(context, 'Reset')),
-                ),
-            ],
-          ),
+            ),
         ],
       ),
     );
@@ -375,9 +318,11 @@ class _StockMovementScreenState extends State<StockMovementScreen> {
 
   BadgeTone _toneForType(String type) {
     switch (type) {
+      case 'out':
       case 'sale':
       case 'transfer_out':
         return BadgeTone.warning;
+      case 'in':
       case 'purchase':
       case 'transfer_in':
         return BadgeTone.success;

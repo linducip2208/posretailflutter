@@ -17,9 +17,11 @@ Widget _wrap(Widget child) {
   );
 }
 
+/// Bentuk backend nyata: GET /loyalty/rewards (envelope, active=true)
+/// {id, name, points_required, discount_type, discount_value, active}.
 MockClient _client({int status = 200}) {
   return MockClient((request) async {
-    if (request.url.path.endsWith('/loyalty-rewards')) {
+    if (request.url.path.endsWith('/loyalty/rewards')) {
       if (status != 200) {
         return http.Response(
           jsonEncode({'message': 'Data tidak ditemukan.'}),
@@ -30,8 +32,22 @@ MockClient _client({int status = 200}) {
       return http.Response(
         jsonEncode({
           'data': [
-            {'id': 1, 'name': 'Kopi Gratis', 'points_cost': 100, 'stock': 5, 'active': true},
-            {'id': 2, 'name': 'Voucher 10rb', 'points_cost': 200, 'stock': 0, 'active': false},
+            {
+              'id': 1,
+              'name': 'Kopi Gratis',
+              'points_required': 100,
+              'discount_type': 'fixed',
+              'discount_value': '10000.00',
+              'active': true,
+            },
+            {
+              'id': 2,
+              'name': 'Voucher 10rb',
+              'points_required': 200,
+              'discount_type': 'fixed',
+              'discount_value': '10000.00',
+              'active': true,
+            },
           ],
         }),
         200,
@@ -74,7 +90,12 @@ void main() {
       return http.Response(
         jsonEncode({
           'data': [
-            {'id': 1, 'name': 'Kopi Gratis', 'points_cost': 100, 'stock': 5, 'active': true},
+            {
+              'id': 1,
+              'name': 'Kopi Gratis',
+              'points_required': 100,
+              'active': true,
+            },
           ],
         }),
         200,

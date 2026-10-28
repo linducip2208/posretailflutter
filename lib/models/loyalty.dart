@@ -2,48 +2,64 @@ import '../utils/safe_parse.dart';
 import '../widgets/common/status_badge.dart';
 
 /// Reward loyalitas: hadiah yang bisa ditukar dengan poin.
-/// Kontrak: GET/POST /loyalty-rewards {name, points_cost, stock, active}
+/// Backend nyata: GET /loyalty/rewards (envelope, hanya active=true)
+/// {id, name, points_required, discount_type, discount_value, active}.
+/// Read-only di mobile; kelola reward dari web admin.
 class LoyaltyReward {
   final int id;
   final String name;
-  final int pointsCost;
-  final int stock;
+  final int pointsRequired;
+  final String? discountType;
+  final double discountValue;
   final bool active;
 
   LoyaltyReward({
     required this.id,
     required this.name,
-    this.pointsCost = 0,
-    this.stock = 0,
+    this.pointsRequired = 0,
+    this.discountType,
+    this.discountValue = 0,
     this.active = true,
   });
+
+  /// Alias kompatibel untuk kode lama (points_cost → points_required).
+  int get pointsCost => pointsRequired;
 
   factory LoyaltyReward.fromJson(Map<String, dynamic> json) {
     return LoyaltyReward(
       id: safeInt(json['id']),
       name: safeString(json['name'], 'Tanpa nama'),
-      pointsCost: safeInt(json['points_cost'] ?? json['pointsCost']),
-      stock: safeInt(json['stock']),
+      pointsRequired: safeInt(
+        json['points_required'] ?? json['points_cost'] ?? json['pointsCost'],
+      ),
+      discountType: (json['discount_type'] ?? json['discountType'])?.toString(),
+      discountValue: safeDouble(
+        json['discount_value'] ?? json['discountValue'],
+      ),
       active: _safeBool(json['active'], true),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'name': name,
-    'points_cost': pointsCost,
-    'stock': stock,
+    'points_required': pointsRequired,
+    if (discountType != null) 'discount_type': discountType,
+    'discount_value': discountValue,
     'active': active,
   };
 }
 
 /// Saldo poin pelanggan.
-/// Kontrak: GET /loyalty-points?customer_id= → earned/redeemed + saldo.
+/// Backend nyata: GET /loyalty/summary?customer_id=
+/// → {customer_id, name, total_points, points_earned, points_redeemed,
+///    total_spent}.
 class LoyaltyPoints {
   final int customerId;
   final String customerName;
   final int earned;
   final int redeemed;
   final int balance;
+  final double totalSpent;
 
   LoyaltyPoints({
     this.customerId = 0,
@@ -51,23 +67,33 @@ class LoyaltyPoints {
     this.earned = 0,
     this.redeemed = 0,
     this.balance = 0,
+    this.totalSpent = 0,
   });
 
   factory LoyaltyPoints.fromJson(Map<String, dynamic> json) {
     final customer = json['customer'];
-    final earned = safeInt(json['earned'] ?? json['total_earned']);
-    final redeemed = safeInt(json['redeemed'] ?? json['total_redeemed']);
-    final balance = json['balance'] != null
-        ? safeInt(json['balance'])
-        : earned - redeemed;
+    final earned = safeInt(
+      json['points_earned'] ?? json['earned'] ?? json['total_earned'],
+    );
+    final redeemed = safeInt(
+      json['points_redeemed'] ?? json['redeemed'] ?? json['total_redeemed'],
+    );
+    final balance = json['total_points'] != null
+        ? safeInt(json['total_points'])
+        : (json['balance'] != null
+              ? safeInt(json['balance'])
+              : earned - redeemed);
+    final directName = safeString(json['name'], '');
     return LoyaltyPoints(
       customerId: safeInt(json['customer_id'] ?? json['customerId']),
-      customerName:
-          json['customer_name']?.toString() ??
-          (customer is Map ? safeString(customer['name'], '') : ''),
+      customerName: directName.isEmpty
+          ? (json['customer_name']?.toString() ??
+                (customer is Map ? safeString(customer['name'], '') : ''))
+          : directName,
       earned: earned,
       redeemed: redeemed,
       balance: balance < 0 ? 0 : balance,
+      totalSpent: safeDouble(json['total_spent'] ?? json['totalSpent']),
     );
   }
 }
@@ -112,9 +138,10 @@ class CustomerGroup {
 }
 
 /// Template diskon untuk checkout POS.
-/// Kontrak: GET/POST /discounts {name, type, value, min_purchase?,
-/// buy_qty?, get_qty?, start_at?, end_at?, active}
-/// type: percent|fixed|buy_x_get_y
+/// Backend nyata: GET /discounts (READ-ONLY, envelope; tanpa filter
+/// type/active di server) {id, name, type, value, min_purchase,
+/// buy_quantity, get_quantity, start_date, end_date, active, outlet_id}.
+/// Kelola template dari web admin. type: percent|fixed|buy_x_get_y
 class DiscountTemplate {
   final int id;
   final String name;
@@ -147,11 +174,16 @@ class DiscountTemplate {
       type: safeString(json['type'], 'percent'),
       value: safeDouble(json['value']),
       minPurchase: safeDouble(json['min_purchase'] ?? json['minPurchase']),
-      buyQty: safeInt(json['buy_qty'] ?? json['buyQty']),
-      getQty: safeInt(json['get_qty'] ?? json['getQty']),
+      buyQty: safeInt(
+        json['buy_quantity'] ?? json['buy_qty'] ?? json['buyQty'],
+      ),
+      getQty: safeInt(
+        json['get_quantity'] ?? json['get_qty'] ?? json['getQty'],
+      ),
       active: _safeBool(json['active'], true),
-      startAt: json['start_at']?.toString(),
-      endAt: json['end_at']?.toString(),
+      startAt:
+          (json['start_date'] ?? json['start_at'])?.toString(),
+      endAt: (json['end_date'] ?? json['end_at'])?.toString(),
     );
   }
 }

@@ -21,29 +21,40 @@ Widget _wrap(Widget child) {
   );
 }
 
+/// Backend nyata:
+/// GET /reports/stock → {inventory_value, low_stock, out_of_stock}
+/// GET /stock-movements → envelope {product: {name}, type, quantity, ...}.
 MockClient _okClient() {
   return MockClient((request) async {
-    if (request.url.path.endsWith('/reports/inventory')) {
+    final path = request.url.path;
+    if (path.endsWith('/reports/stock')) {
       return http.Response(
         jsonEncode({
           'data': {
-            'total_value': '25000000.00',
-            'opname_accuracy': 96.5,
-            'low_stock': [
-              {'name': 'Kopi Arabika', 'qty': 2, 'unit': 'pcs'},
-            ],
-            'overstock': [
-              {'name': 'Gula 1kg', 'qty': 500},
-            ],
-            'movements': [
-              {
-                'product_name': 'Kopi Arabika',
-                'type': 'sale',
-                'qty_change': -2,
-                'created_at': '2026-10-27T10:00:00Z',
-              },
-            ],
+            'inventory_value': 25000000,
+            'low_stock': 3,
+            'out_of_stock': 1,
+            'outlet_scope': [1],
           },
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (path.endsWith('/stock-movements')) {
+      return http.Response(
+        jsonEncode({
+          'data': [
+            {
+              'id': 1,
+              'product': {'id': 7, 'name': 'Kopi Arabika'},
+              'type': 'out',
+              'quantity': 2,
+              'reference_type': 'sale',
+              'created_at': '2026-10-27T10:00:00.000Z',
+            },
+          ],
+          'meta': {'current_page': 1, 'total': 1},
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -60,16 +71,16 @@ void main() {
     ApiService.client = http.Client();
   });
 
-  testWidgets('kartu nilai + low stock + overstock + mutasi tampil',
+  testWidgets('kartu nilai + jumlah menipis/habis + mutasi tampil',
       (tester) async {
     ApiService.client = _okClient();
 
     await tester.pumpWidget(_wrap(const InventoryReportScreen()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Kopi Arabika'), findsWidgets);
-    expect(find.text('Gula 1kg'), findsOneWidget);
-    expect(find.text('96.5%'), findsOneWidget);
+    expect(find.text('Kopi Arabika'), findsOneWidget);
+    expect(find.text('Stok Menipis'), findsOneWidget);
+    expect(find.text('Stok Habis'), findsOneWidget);
     await tester.drag(find.byType(ListView).first, const Offset(0, -800));
     await tester.pumpAndSettle();
     expect(find.textContaining('PDF/Excel'), findsWidgets);
@@ -86,14 +97,23 @@ void main() {
           headers: {'content-type': 'application/json'},
         );
       }
+      if (request.url.path.endsWith('/reports/stock')) {
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'inventory_value': 0,
+              'low_stock': 0,
+              'out_of_stock': 0,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
       return http.Response(
         jsonEncode({
-          'data': {
-            'total_value': 0,
-            'low_stock': [],
-            'overstock': [],
-            'movements': [],
-          },
+          'data': [],
+          'meta': {'current_page': 1, 'total': 0},
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -107,7 +127,9 @@ void main() {
     await tester.tap(find.text('Coba Lagi'));
     await tester.pumpAndSettle();
 
-    expect(calls, 2);
+    // Gagal di load pertama (2 request paralel: stock 404);
+    // retry = stock + movements.
+    expect(calls, 4);
     expect(find.text('Coba Lagi'), findsNothing);
   });
 }
